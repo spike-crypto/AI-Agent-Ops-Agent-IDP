@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy>=2.0
+pyjwt
+email-validator
+python-multipart
+pypdf
+openai
+agentops

@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+tests
+__pycache__
+.env
+data
+sample_data
+scripts
+docs

@@ -1,0 +1,5 @@
+Rahul Menon - rahul.menon@example.com
+Full-stack developer, 3 years.
+- React and Node.js (Express) for an e-commerce site.
+- Some Python scripting for data cleanup.
+- Used MongoDB; basic Docker for local development.

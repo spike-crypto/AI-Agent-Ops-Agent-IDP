@@ -1,0 +1,27 @@
+# Render Blueprint: New > Blueprint in the Render dashboard, pick this repo.
+# Secret values (sync: false) are asked for once, when you create the Blueprint.
+services:
+  - type: web
+    name: hiring-desk
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    # GitHub Actions deploys after tests pass. Render must not deploy on its own,
+    # or every merge deploys twice.
+    autoDeployTrigger: off
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_NAME
+        value: HR Admin
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODELS
+        value: google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3.5-lightning:free
+      - key: AGENTOPS_API_KEY
+        sync: false

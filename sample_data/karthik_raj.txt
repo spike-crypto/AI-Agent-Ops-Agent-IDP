@@ -1,0 +1,5 @@
+Karthik Raj - karthik.raj@example.com
+Software engineer, 2 years.
+- Python and FastAPI microservices for an internal HR tool.
+- PostgreSQL, pytest, Docker Compose.
+- CI pipelines with GitHub Actions.
