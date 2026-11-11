@@ -1,0 +1,6 @@
+Ananya Iyer - ananya.iyer@example.com
+Backend Engineer, 5 years.
+- Built REST APIs in Python with FastAPI and Django for a fintech startup.
+- Containerised services with Docker, deployed via GitHub Actions to AWS.
+- Designed PostgreSQL schemas, wrote migrations, tuned slow queries.
+- Mentored two junior developers; ran code reviews.

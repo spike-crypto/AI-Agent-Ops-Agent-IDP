@@ -1,0 +1,4 @@
+Sneha Das - sneha.das@example.com
+Data analyst, 4 years.
+- SQL (PostgreSQL), Python pandas, Power BI dashboards.
+- Automated weekly reports with Python scripts.
