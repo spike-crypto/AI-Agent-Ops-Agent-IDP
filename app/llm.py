@@ -81,6 +81,28 @@ class FakeLLM:
                 "strengths": matched[:5],
                 "gaps": missing[:5],
             })
+        if "interview kit" in prompt.lower() or "tailored interview questions" in prompt.lower():
+            return (
+                "## Interview Kit\n\n"
+                "### Questions\n"
+                "1. [Technical] How do you design scalable APIs with FastAPI and handle async database operations?\n"
+                "   - Strong answer: Explains async event loop, connection pooling, and non-blocking I/O.\n"
+                "2. [Technical] How do you structure Docker containers for production deployments?\n"
+                "   - Strong answer: Mentions multi-stage builds, non-root users, and minimal base images.\n"
+                "3. [Resume Follow-up] In your resume you mentioned leading a microservices migration. What challenges arose?\n"
+                "   - Strong answer: Describes concrete latency, distributed tracing, and data consistency issues.\n"
+                "4. [Resume Follow-up] How did you monitor services and track performance bottlenecks?\n"
+                "   - Strong answer: Discusses metrics, APM tracing, and structured logging.\n"
+                "5. [Screening Gap] Can you walk us through your hands-on experience with automated CI/CD pipelines?\n"
+                "   - Strong answer: Demonstrates clear understanding of PR checks, artifact packaging, and zero-downtime deploys.\n"
+                "6. [Screening Gap] How do you handle schema migrations and rollback strategies in production?\n"
+                "   - Strong answer: Covers Alembic/Flyway versioning, backward-compatible schemas, and blue/green deploys.\n"
+                "7. [Behavioral & Problem Solving] Describe a situation where a service failed in production. How did you triage?\n"
+                "   - Strong answer: Explains incident response, post-mortems, and preventive alerting.\n\n"
+                "### Evaluation Rubric\n"
+                "- High Hire (4-5): Demonstrates deep architectural reasoning, mentions security/performance trade-offs, communicates clearly.\n"
+                "- Mixed/Low Hire (1-2): Vague answers, cannot explain architecture decisions, lacks concrete examples."
+            )
         first_line = prompt.strip().splitlines()[0] if prompt.strip() else ""
         return f"[Draft generated offline by FakeLLM]\n\n{first_line}\n\nPlease edit before sending."
 
