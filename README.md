@@ -10,6 +10,21 @@ or interviewer until they have approved it.
 | **screening** | Scores every resume against the job's requirements, with reasons | job:read, candidate:read, candidate:write |
 | **scheduling** | Creates an interview with proposed slots and drafts the invite | job:read, candidate:read, interview:write, draft:write |
 | **feedback** | Finds interviews with missing feedback, drafts reminders, summarises feedback | candidate:read, candidate:write, interview:read, feedback:read, draft:write |
+| **comparison** | Compares 2 to 4 candidates for one job side by side (read-only) | job:read, candidate:read |
+
+## The HR cockpit
+
+The UI at `/` is built for the HR person, not for developers:
+
+- **Today**: what needs you right now (drafts to approve, resumes to screen, times to confirm,
+  missing feedback), a getting-started checklist, and each job's candidates by stage.
+- **Candidates**: a board with one column per hiring stage. Open a candidate for the AI's
+  reasons and the next step; tick 2 to 4 to compare them.
+- **Review queue**: everything the AI wrote, waiting for approval. Nothing is sent automatically.
+- **AI activity**: what each assistant is allowed to touch, and a log of every run.
+
+Colour carries meaning: violet = written or suggested by AI, amber = waiting on you,
+green = done. Icons are [Lucide](https://lucide.dev) (ISC licence), vendored in `app/static/vendor/`.
 
 ## Security model
 
