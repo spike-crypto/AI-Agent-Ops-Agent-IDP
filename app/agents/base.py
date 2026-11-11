@@ -91,6 +91,13 @@ class AgentContext:
             raise LookupError(f"Interviewer {user_id} not found")
         return user
 
+    def interview(self, interview_id: int) -> Interview:
+        self.require("interview:read")
+        interview = self._db.get(Interview, interview_id)
+        if interview is None:
+            raise LookupError(f"Interview {interview_id} not found")
+        return interview
+
     def overdue_interviews(self) -> list[tuple[Interview, User, Candidate]]:
         """Scheduled interviews in the past that still have no feedback."""
         self.require("interview:read")

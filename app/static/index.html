@@ -196,16 +196,22 @@ async function interviewsView() {
   const rows = await api("/interviews");
   $("#main").innerHTML = `<div class="panel"><div class="row"><h2 style="margin:0">Interviews</h2>
     <button class="btn small" id="chase" style="margin-left:auto">🔔 Feedback agent: chase missing feedback</button></div>
-    ${rows.length ? `<table><tr><th>Candidate</th><th>Job</th><th>Interviewer</th><th>When</th><th>Feedback</th></tr>
+    ${rows.length ? `<table><tr><th>Candidate</th><th>Job</th><th>Interviewer</th><th>When</th><th>Feedback</th><th></th></tr>
     ${rows.map(i => `<tr><td>${esc(i.candidate.name)}</td><td>${esc(i.job.title)}</td><td>${esc(i.interviewer.name)}</td>
       <td>${i.scheduled_at ? esc(i.scheduled_at.replace("T"," ")) : `<span class="chip">proposed</span>
         <form class="row" data-cf="${i.id}" style="margin-top:6px"><select name="slot">${i.proposed_slots.map(s => `<option>${esc(s)}</option>`).join("")}</select>
         <button class="btn ghost small">Confirm slot</button></form>`}</td>
-      <td>${i.feedback ? `<b>${i.feedback.rating}/5</b> <span class="muted">${esc(i.feedback.notes)}</span>` : `<span class="muted">waiting</span>`}</td></tr>`).join("")}</table>`
+      <td>${i.feedback ? `<b>${i.feedback.rating}/5</b> <span class="muted">${esc(i.feedback.notes)}</span>` : `<span class="muted">waiting</span>`}</td>
+      <td><button class="btn ghost small" data-kit="${i.id}">🧩 Interview kit</button></td></tr>`).join("")}</table>`
     : `<p class="muted">No interviews yet. Schedule one from a candidate row.</p>`}</div>`;
   $("#chase").onclick = e => busy(e.target, async () => { const r = await api("/agents/feedback/chase", { method: "POST", body: {} }); toast(r.summary + (r.drafts.length ? ". Reminders are in 'Drafts to review'" : "")); });
   document.querySelectorAll("[data-cf]").forEach(f => f.onsubmit = e => { e.preventDefault();
     busy($("button", f), async () => { await api(`/interviews/${f.dataset.cf}/confirm`, { method: "POST", body: { slot: new FormData(f).get("slot") } }); toast("Slot confirmed"); render(); }); });
+  document.querySelectorAll("[data-kit]").forEach(b => b.onclick = () => busy(b, async () => {
+    const r = await api("/agents/interview_kit/prepare", { method: "POST", body: { interview_id: +b.dataset.kit } });
+    toast(r.summary + ". Kit draft is in 'Drafts to review'");
+    render();
+  }));
 }
 
 // ---------- drafts ----------
