@@ -68,6 +68,8 @@ class FakeLLM:
     """
 
     def complete(self, system: str, prompt: str, json_mode: bool = False) -> str:
+        if json_mode and "CANDIDATES:" in prompt:
+            return self._compare(prompt)
         if json_mode and "REQUIREMENTS:" in prompt and "RESUME:" in prompt:
             req = prompt.split("REQUIREMENTS:", 1)[1].split("RESUME:", 1)[0]
             resume = prompt.split("RESUME:", 1)[1]
@@ -83,6 +85,20 @@ class FakeLLM:
             })
         first_line = prompt.strip().splitlines()[0] if prompt.strip() else ""
         return f"[Draft generated offline by FakeLLM]\n\n{first_line}\n\nPlease edit before sending."
+
+    def _compare(self, prompt: str) -> str:
+        req = prompt.split("REQUIREMENTS:", 1)[1].split("CANDIDATES:", 1)[0]
+        wanted = _keywords(req)
+        out = []
+        for block in prompt.split("### CANDIDATE id=")[1:]:
+            cid = int(re.match(r"\d+", block).group(0))
+            have = _keywords(block.split("RESUME:", 1)[-1])
+            out.append({"id": cid, "strengths": sorted(wanted & have)[:4], "risks": [f"no mention of {w}" for w in sorted(wanted - have)[:3]]})
+        return json.dumps({
+            "overview": f"Offline comparison of {len(out)} candidates by requirement keywords.",
+            "candidates": out,
+            "open_questions": ["Ask each candidate for a concrete example of their strongest requirement."],
+        })
 
 
 def parse_json(text: str) -> dict:

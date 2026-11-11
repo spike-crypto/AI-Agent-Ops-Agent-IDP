@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from app.config import settings
@@ -61,10 +62,14 @@ def ui():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
 # --- Feature routers: add yours below this line ---
-from app.routers import agents, auth, drafts, interviews, jobs  # noqa: E402
+from app.routers import agents, auth, dashboard, drafts, interviews, jobs  # noqa: E402
 
 app.include_router(auth.router)
+app.include_router(dashboard.router)
 app.include_router(jobs.router)
 app.include_router(interviews.router)
 app.include_router(drafts.router)
