@@ -1,0 +1,52 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -v
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Ask Render to deploy exactly this commit
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then echo "RENDER_DEPLOY_HOOK_URL secret is not set"; exit 1; fi
+          code=$(curl -s -o response.json -w "%{http_code}" -X POST "$RENDER_DEPLOY_HOOK_URL&ref=$SHA")
+          echo "Render answered HTTP $code"
+          # 200 = deploy started, 202 = queued behind a running deploy.
+          if [ "$code" != "200" ] && [ "$code" != "202" ]; then cat response.json; exit 1; fi
+
+  smoke-test:
+    needs: deploy
+    runs-on: ubuntu-latest
+    env:
+      APP_URL: ${{ vars.APP_URL }}
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Wait for the new version, then check it
+        run: |
+          # Render free builds the Docker image and may also be waking from sleep: allow ~12 minutes.
+          for i in $(seq 1 48); do
+            v=$(curl -fs --max-time 10 "$APP_URL/health" | jq -r .version || true)
+            if [ "$v" = "$SHA" ]; then echo "Live: $v"; exit 0; fi
+            echo "Attempt $i: live version is '$v', waiting..."
+            sleep 15
+          done
+          echo "New version never went live"; exit 1
