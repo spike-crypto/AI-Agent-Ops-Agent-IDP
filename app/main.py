@@ -65,6 +65,16 @@ def ui():
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.middleware("http")
+async def revalidate_ui(request, call_next):
+    """Make browsers check for a new UI on every load (cheap: unchanged files return 304 via ETag).
+    Without this, a browser can keep showing an old UI after a deploy."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 # --- Feature routers: add yours below this line ---
 from app.routers import agents, auth, dashboard, drafts, interviews, jobs  # noqa: E402
 

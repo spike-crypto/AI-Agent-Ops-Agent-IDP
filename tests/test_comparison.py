@@ -67,3 +67,9 @@ def test_dashboard_is_hr_only(client, interviewer):
 def test_icons_are_served(client):
     r = client.get("/static/vendor/lucide.min.js")
     assert r.status_code == 200 and "lucide" in r.text[:200]
+
+
+def test_ui_is_revalidated_after_deploys(client):
+    for path in ("/", "/static/app.js"):
+        assert client.get(path).headers["cache-control"] == "no-cache"
+    assert "cache-control" not in client.get("/health").headers
