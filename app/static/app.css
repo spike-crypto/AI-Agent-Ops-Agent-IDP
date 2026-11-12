@@ -253,7 +253,11 @@ tr:last-child td { border-bottom: 0; }
 .card {
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 10px 10px 12px;
   display: grid; gap: 6px; cursor: pointer; text-align: left; width: 100%; min-width: 0;
+  /* The card's own rows must shrink too, or a long name or summary spills into the next column. */
+  grid-template-columns: minmax(0, 1fr); overflow: hidden;
 }
+.card-top, .card-sum { min-width: 0; }
+.card-top > input, .card-top > .score { flex: none; }
 .card-sum { overflow-wrap: anywhere; }
 .drawer-head h2 { overflow-wrap: anywhere; }
 .card:hover { border-color: var(--ink-3); }
