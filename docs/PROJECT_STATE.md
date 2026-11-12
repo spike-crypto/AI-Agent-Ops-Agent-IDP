@@ -31,6 +31,9 @@
 
 - **Backend:** FastAPI + SQLAlchemy 2 (`app/`). Python 3.12. SQLite for tests and local dev;
   Postgres (psycopg) in production via `DATABASE_URL` (`app/db.py` normalises `postgres://`).
+- **Production Database (Supabase PostgreSQL):** The live Render deployment uses a managed
+  Supabase PostgreSQL instance via connection pooling (`aws-0-ap-southeast-2.pooler.supabase.com:5432`),
+  providing persistent cloud storage with IPv4 compatibility and zero 30-day expiry limits.
 - **Schema:** Alembic is the only thing that changes the schema (`alembic/versions/`, `0001`
   is the pre-Alembic baseline). `run_migrations()` (`app/migrations.py`) runs at startup and
   handles a fresh DB, a pre-Alembic DB (stamped 0001 then upgraded in place) and a current DB.

@@ -37,8 +37,9 @@ Three ideas run through the whole codebase. **Don't break them:**
    trace and writes an `AgentRun` audit row (success, denied or error), shown in
    *Agent activity* in the UI.
 
-It is a **prototype**: fake resumes only (see `sample_data/`), and the SQLite database resets
-on every deploy.
+It is a **prototype**: fake resumes only (see `sample_data/`). The production app uses
+**Supabase PostgreSQL** via `DATABASE_URL` so all candidates, jobs, and drafts persist
+permanently across deploys. SQLite remains available for local dev and tests.
 
 ## 2. Status: what Bala already built (on `main`)
 
