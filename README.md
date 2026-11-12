@@ -1,6 +1,6 @@
 # Hiring Desk: HR agents with a human in charge
 
-A prototype for **one HR person** who runs hiring end to end. Four AI agents do the
+A prototype for **one HR person** who runs hiring end to end. Six AI agents do the
 repetitive work. The HR person makes every decision, and nothing goes to a candidate
 or interviewer until they have approved it.
 
@@ -11,6 +11,7 @@ or interviewer until they have approved it.
 | **scheduling** | Creates an interview with proposed slots and drafts the invite | job:read, candidate:read, interview:write, draft:write |
 | **feedback** | Finds interviews with missing feedback, drafts reminders, summarises feedback | candidate:read, candidate:write, interview:read, feedback:read, draft:write |
 | **comparison** | Compares 2 to 4 candidates for one job side by side (read-only) | job:read, candidate:read |
+| **interview_kit** | Prepares tailored interview questions and a rubric, addressed to the interviewer | job:read, candidate:read, interview:read, draft:write |
 
 ## The HR cockpit
 
@@ -63,7 +64,7 @@ Open http://localhost:8000, sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, creat
 and upload the files in `sample_data/`. API docs are at http://localhost:8000/docs.
 
 Free OpenRouter models are slow (one resume took ~40 s on `google/gemma-4-31b-it:free`),
-so screen a handful of resumes at a time.
+so the UI screens 2 resumes per request and shows "Screened n of N" progress.
 
 Without `OPENROUTER_API_KEY`, the app uses **FakeLLM**: offline, free, deterministic
 (screening scores by keyword overlap). Tests and CI always use it.
