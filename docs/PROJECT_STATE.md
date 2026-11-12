@@ -1,7 +1,9 @@
 # Project state: Hiring Desk (read this first)
 
-> For any agent or person continuing this work. Last updated 2026-11-12, after PRs #7, #9 and
-> #10 were merged (main = `701fc6c`, live and smoke-tested). It covers what exists, why, where things are, conventions, and what to do next.
+> For any agent or person continuing this work. Last updated 2026-11-12 on
+> `fix/candidate-board-bugs`, which adds the post-review hardening (auth, Postgres/Alembic,
+> background jobs, free public ATS, logging) on top of main `701fc6c`. It covers what exists,
+> why, where things are, conventions, and what to do next.
 > Abinesh's own task brief is `docs/HANDOFF_ABINESH.md`; user docs are `README.md`.
 
 ## 1. Who and what
@@ -25,11 +27,35 @@
 | Render service | `srv-dbq6ogd6e07s73bd20q0`, created by Abinesh's Render account from `render.yaml` |
 | Local project | `D:\Projects\Agent IDP` (Windows 11, PowerShell + Git Bash) |
 
-## 3. Architecture (one container)
+## 3. Architecture (one container plus Postgres)
 
-- **Backend:** FastAPI + SQLAlchemy 2 + SQLite (`app/`). Python 3.12.
-- **Auth:** email + password (PBKDF2, stdlib) → JWT bearer (`app/security.py`, `app/deps.py`).
-  Roles: `hr_admin`, `interviewer`. Role read from DB each request; deactivation locks out at once.
+- **Backend:** FastAPI + SQLAlchemy 2 (`app/`). Python 3.12. SQLite for tests and local dev;
+  Postgres (psycopg) in production via `DATABASE_URL` (`app/db.py` normalises `postgres://`).
+- **Schema:** Alembic is the only thing that changes the schema (`alembic/versions/`, `0001`
+  is the pre-Alembic baseline). `run_migrations()` (`app/migrations.py`) runs at startup and
+  handles a fresh DB, a pre-Alembic DB (stamped 0001 then upgraded in place) and a current DB.
+  Verified by `tests/test_migrations.py`, including a legacy DB with data.
+- **Auth** (`app/routers/auth.py`, `app/security.py`, `app/deps.py`, `app/totp.py`, `app/ratelimit.py`):
+  PBKDF2-SHA256 passwords; 15-minute JWT access token (`ver` claim) + rotating opaque refresh
+  token in an httpOnly cookie; server-side logout, logout-all and reset revoke via
+  `users.token_version`. Self-service and HR-issued password resets (single-use, 30 min),
+  TOTP MFA with hashed recovery codes and a short-lived `scope: mfa` challenge token, account
+  lockout plus per-IP limits on login/forgot/apply, optional OIDC SSO (`app/oidc.py`, discovery
+  + signed state/nonce cookie + JWKS). Roles: `hr_admin`, `interviewer`; role read from DB each
+  request, deactivation locks out at once. `JWT_SECRET` is required at startup (no random
+  per-process fallback).
+- **Agent jobs** (`app/jobqueue.py`, `POST/GET /agent-jobs`): screening/compare/kit runs as a
+  `AgentJob` row processed by an in-process worker thread (`RUN_WORKER=true`), with progress,
+  cancellation and `result` JSON. The worker checkpoints after every resume (`ctx.checkpoint()`
+  in `base.py`) so a crash or cancel keeps finished work. `FOR UPDATE SKIP LOCKED` on Postgres.
+  Free models are retried across the model list; non-JSON answers are treated as a failed
+  attempt and the next model tries (`tests/test_llm.py`).
+- **Free ATS** (`app/routers/public.py`, `app/static/careers.html`): public `/careers` page and
+  `/public/jobs`, `/public/jobs/{id}/apply`, no login. Applications land with
+  `candidates.source="careers"`; duplicate email/resume rejected; upload validation;
+  per-IP rate limit.
+- **Logging** (`app/logging_config.py`): structured logs with a request id per call; JSON in
+  production (`LOG_JSON=true`), human-readable locally.
 - **Agents** (`app/agents/`). Agents never touch the DB: they get an `AgentContext` (`base.py`)
   whose methods check scopes. Effective scopes = agent's declared scopes ∩ role's scopes.
   `runner.py` does the role check, builds the context, wraps an AgentOps trace and always writes
@@ -40,17 +66,19 @@
   | writing | AI Writer | job_description, rejection, offer | job:read, job:salary:read, candidate:read, draft:write |
   | screening | AI Screener | screen | job:read, candidate:read, candidate:write |
   | scheduling | AI Scheduler | propose | job:read, candidate:read, interview:write, draft:write |
-  | feedback | AI Follow-up | chase, summarize | candidate:read, candidate:write, interview:read, feedback:read, draft:write |
+  | feedback | AI Follow-up | chase, summarize, synthesize (decision memo, Abinesh) | job:read, candidate:read, candidate:write, interview:read, feedback:read, draft:write |
   | comparison | AI Comparer | compare (2-4 ids) | job:read, candidate:read (read-only). Bala's Part H |
   | interview_kit | AI Interview Kit | prepare (interview_id) | job:read, candidate:read, interview:read, draft:write. Abinesh's Part H |
 
 - **Human in the loop:** agents only create `Draft` rows (status pending). `POST /drafts/{id}/approve`
   is the human step. The app never sends email.
-- **LLM:** `app/llm.py`. `OpenRouterLLM` (OpenAI-compatible client, model fallback list, retries)
-  or `FakeLLM` (offline, deterministic, keyword-based). **Tests and CI always use FakeLLM.**
-  Current free models: `google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3.5-lightning:free`
-  (the old llama default was removed from OpenRouter). Free models are slow, ~40 s per resume;
-  the UI screens 2 resumes per request and returns `processed`/`remaining` for progress.
+- **LLM:** `app/llm.py`. `OpenRouterLLM` only (OpenAI-compatible client, model fallback list,
+  retries). **There is deliberately no fake model in `app/`**: without a key the AI says it is
+  unavailable. Tests inject a stub via `app.dependency_overrides[get_llm_optional]`
+  (`tests/stub_llm.py`), so CI needs no key and no network. Current free models:
+  `google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3.5-lightning:free`.
+  Free models are slow and rate-limited (observed 429s); the fallback list is tried on timeout,
+  429, empty or non-JSON answers. `/health` runs a real one-shot check and reports latency.
 - **Observability:** `app/observability.py`, AgentOps optional (`AGENTOPS_API_KEY`), never crashes
   the app. The SDK calls (`start_trace`/`end_trace`) were written from memory and are **not
   verified** against a real AgentOps key yet.
@@ -58,9 +86,13 @@
   tries to force a score of 100. Verified with the real model: it scored 0.
 - **UI (the HR cockpit)** at `/`: `app/static/index.html`, `app.css`, `app.js`, vanilla JS, no
   build step. Icons: Lucide 1.61.0 vendored at `app/static/vendor/lucide.min.js` (`icon("name")`).
-  Views: Today (`GET /dashboard`), Candidates (stage board, drawer, compare), Jobs, Interviews
+  Views: Today (`GET /dashboard`), Candidates (stage board, drawer, compare, background
+  screening with "Screened n of N"), Jobs (location, publish/hide, careers link), Interviews
   (with an "Interview kit" button per row, also in the candidate drawer), Review queue,
-  AI activity, Team, How it works; interviewers see only "My interviews".
+  AI activity, Team (reset password, 2FA setup/recovery codes, sign out everywhere),
+  How it works; interviewers see only "My interviews". Sign-in supports silent token renewal,
+  MFA, forgot/reset password and SSO when configured; a separate public `careers.html`
+  serves the free ATS.
   Design rules: **no emoji**, Lucide icons only, violet = AI, amber = waiting on you, green = done,
   plain sentence-case copy for HR people. Checked in Edge: light, dark, 390 px phone width.
 - **Health/version:** `/health` returns `version` from `app/version.txt` if present, else
@@ -75,8 +107,10 @@
   `$APP_URL/health` up to 48 × 15 s until `version == SHA`.
 - GitHub settings: secret `RENDER_DEPLOY_HOOK_URL` (set by Abinesh), variable `APP_URL`
   (`https://hiring-desk-30s9.onrender.com`). Abinesh also added an unused secret `APP_URL`; harmless.
-- `render.yaml`: Docker web service `hiring-desk`, free plan, `healthCheckPath: /health`,
-  `autoDeployTrigger: off` (otherwise every merge deploys twice; confirm in the Render dashboard).
+- `render.yaml`: Docker web service `hiring-desk` (free plan, `healthCheckPath: /health`,
+  `autoDeployTrigger: off`) plus a free Postgres database wired in as `DATABASE_URL`, with
+  `APP_ENV=production` and `LOG_JSON=true`. Render must not deploy on its own, or every merge
+  deploys twice; confirm in the dashboard.
 - **Branch protection on main:** PR required, 1 approval, `test` check, `enforce_admins` on.
   Nobody approves their own PR.
 - **Branch housekeeping:** merging a PR deletes its head branch automatically
@@ -131,11 +165,13 @@ After Part H, PRs #7 (docs), #9 (interview-kit and board fixes, approved by Abin
 
 ## 7. Secrets and local environment
 
-- **`.env`** (git-ignored, never commit): `JWT_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME`,
-  `OPENROUTER_API_KEY` (+ two commented spare keys; deliberately no key rotation, which may
-  break OpenRouter's terms), `OPENROUTER_MODELS`, `AGENTOPS_API_KEY` (empty), `DATABASE_URL`,
-  `RENDER_DEPLOY_HOOK_URL` (empty locally; the real value is only in GitHub secrets / Abinesh),
-  `APP_URL`. The keys were pasted in chat once; rotate them if that session is ever shared.
+- **`.env`** (git-ignored, never commit): `JWT_SECRET` (required, 32+ chars),
+  `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `OPENROUTER_API_KEY` (+ commented spares;
+  deliberately no key rotation, which may break OpenRouter's terms), `OPENROUTER_MODELS`,
+  `AGENTOPS_API_KEY` (empty), `DATABASE_URL`, `RENDER_DEPLOY_HOOK_URL` (empty locally; the real
+  value is only in GitHub secrets / Abinesh), `APP_URL`. `.env.example` lists every optional
+  tuning key (token lifetimes, lockout, OIDC, logging). The keys were pasted in chat once;
+  rotate them if that session is ever shared.
 - The live Render app's admin login is whatever Abinesh entered when creating the Blueprint.
 - Python: `uv` + venv at `.venv` (`.venv\Scripts\python.exe -m pytest -q`; the system `python`
   alias is broken, use the venv or `uv`).
@@ -147,7 +183,11 @@ After Part H, PRs #7 (docs), #9 (interview-kit and board fixes, approved by Abin
 
 ## 8. Known limits
 
-- SQLite inside the container resets on every Render deploy; free instance sleeps after ~15 min.
+- One container runs one web process and one in-process job worker. Horizontal scale needs a
+  shared queue (the DB poll and `SKIP LOCKED` are in place; the per-process worker loop is not).
+- Render free Postgres expires after 30 days and the free web instance sleeps after ~15 min.
+- Free OpenRouter models are slow and rate-limited (429s seen in normal use). Default `gemma`
+  models take tens of seconds per resume; the fallback list absorbs most of it.
 - Prototype: fake resumes only (`sample_data/`); free models may log prompts.
 - Interview times are naive datetimes (no timezone handling).
 - AgentOps integration unverified with a real key.
@@ -160,21 +200,22 @@ unbatched screening) were fixed in PR #9 and are live.
 
 ## 9. Next steps (in order)
 
-1. Housekeeping (ready): Bala runs the `cleanup-branches` workflow; Abinesh approves the
-   `branch-cleanup` deployment, and it deletes `setup/deploy`, `feature/bala-cockpit-ui`,
-   `feature/abinesh-interview-kit` and `fix/candidate-board-bugs`. Pass
-   `docs/update-handoffs` in the workflow input once this refresh has merged (it supersedes that
-   branch); keep `test/break-it-on-purpose` as the Part I record.
-2. Optional, to make the review record clean: Abinesh adds an approving review to the merged
+1. Open a PR from `fix/candidate-board-bugs` and get Abinesh's approval (the hardening touches
+   auth, deploy config and shared UI, so it must go through review). On merge, Render creates
+   the Postgres database from `render.yaml`; the admin login on the live app stays whatever
+   Abinesh entered when creating the Blueprint.
+2. Housekeeping after that merge: Bala runs the `cleanup-branches` workflow; Abinesh approves
+   the `branch-cleanup` deployment, and it deletes `setup/deploy`, `feature/bala-cockpit-ui`
+   and `feature/abinesh-interview-kit`; keep `test/break-it-on-purpose` as the Part I record.
+3. Optional, to make the review record clean: Abinesh adds an approving review to the merged
    PR #3.
-3. Optional: add `AGENTOPS_API_KEY` in Render and verify traces; consider Render Postgres before
-   any real data.
+4. Optional: add `AGENTOPS_API_KEY` in Render and verify traces; add OIDC settings to turn on SSO.
 
 ## 10. How to verify quickly
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 40 tests, all offline
-curl -s https://hiring-desk-30s9.onrender.com/health
+.venv/Scripts/python.exe -m pytest -q          # 100 tests, all offline
+curl -s https://hiring-desk-30s9.onrender.com/health   # includes a real LLM check
 gh pr list --repo spike-crypto/AI-Agent-Ops-Agent-IDP --state all
 gh run list --repo spike-crypto/AI-Agent-Ops-Agent-IDP --limit 5
 gh api repos/spike-crypto/AI-Agent-Ops-Agent-IDP/branches/main/protection --jq .required_status_checks.contexts

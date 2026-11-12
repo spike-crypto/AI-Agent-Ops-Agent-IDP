@@ -3,8 +3,8 @@ import pytest
 from app.agents.base import AgentContext, AgentPermissionError
 from app.agents.registry import AGENTS
 from app.db import SessionLocal
-from app.llm import FakeLLM
 from app.models import Draft, Interview, User
+from tests.stub_llm import StubLLM
 
 
 def create_interview_fixture(client, hr, interviewer, job):
@@ -89,8 +89,9 @@ def test_kit_contains_questions_and_rubric(client, hr, interviewer, job):
 def test_interview_kit_agent_never_receives_salary_band(job, hr, interviewer, client):
     cid, iid = create_interview_fixture(client, hr, interviewer, job)
 
-    class SpyLLM(FakeLLM):
+    class SpyLLM(StubLLM):
         def __init__(self):
+            super().__init__()
             self.prompts: list[str] = []
 
         def complete(self, system: str, prompt: str, json_mode: bool = False) -> str:

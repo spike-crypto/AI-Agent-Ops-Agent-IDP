@@ -3,8 +3,8 @@ import pytest
 from app.agents.base import AgentContext
 from app.agents.registry import AGENTS
 from app.db import SessionLocal
-from app.llm import FakeLLM
 from app.models import Draft, Feedback, Interview, User
+from tests.stub_llm import StubLLM
 
 
 def setup_interview_with_feedback(client, hr, interviewer, job):
@@ -113,8 +113,9 @@ def test_interviewer_cannot_synthesize_decision(client, hr, interviewer, job):
 def test_synthesis_never_sees_salary_band(job, hr, interviewer, client):
     cid, iid = setup_interview_with_feedback(client, hr, interviewer, job)
 
-    class SpyLLM(FakeLLM):
+    class SpyLLM(StubLLM):
         def __init__(self):
+            super().__init__()
             self.prompts: list[str] = []
 
         def complete(self, system: str, prompt: str, json_mode: bool = False) -> str:

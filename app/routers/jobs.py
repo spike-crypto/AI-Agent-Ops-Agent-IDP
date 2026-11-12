@@ -1,5 +1,3 @@
-import io
-
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -7,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user, require_hr
-from app.models import CANDIDATE_STATUSES, Candidate, Interview, Job, User
-from app.resume_parsing import find_email, fingerprint, guess_name
+from app.models import CANDIDATE_STATUSES, JOB_STATUSES, Candidate, Interview, Job, User
+from app.resume_parsing import extract_text, find_email, fingerprint, guess_name
 
 router = APIRouter(tags=["jobs & candidates"])
 
@@ -16,17 +14,21 @@ router = APIRouter(tags=["jobs & candidates"])
 class JobIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     department: str = ""
+    location: str = ""
     requirements: str = Field(min_length=1)
     salary_band: str = ""
+    published: bool = False
 
 
 class JobPatch(BaseModel):
-    title: str | None = None
+    title: str | None = Field(None, min_length=1, max_length=200)
     department: str | None = None
-    requirements: str | None = None
+    location: str | None = None
+    requirements: str | None = Field(None, min_length=1)
     description: str | None = None
     salary_band: str | None = None
     status: str | None = None
+    published: bool | None = None
 
 
 class CandidateIn(BaseModel):
@@ -40,13 +42,14 @@ class StatusIn(BaseModel):
 
 
 def job_out(j: Job) -> dict:
-    return {"id": j.id, "title": j.title, "department": j.department, "requirements": j.requirements,
-            "description": j.description, "salary_band": j.salary_band, "status": j.status}
+    return {"id": j.id, "title": j.title, "department": j.department, "location": j.location,
+            "requirements": j.requirements, "description": j.description,
+            "salary_band": j.salary_band, "status": j.status, "published": j.published}
 
 
 def candidate_out(c: Candidate, full: bool = True) -> dict:
     data = {"id": c.id, "job_id": c.job_id, "name": c.name, "email": c.email,
-            "resume_text": c.resume_text, "status": c.status}
+            "resume_text": c.resume_text, "status": c.status, "source": c.source}
     if full:  # HR only: interviewers don't see agent scores, so they judge independently
         data.update(score=c.score, screening=c.screening, feedback_summary=c.feedback_summary)
     return data
@@ -80,7 +83,10 @@ def get_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(requir
 @router.patch("/jobs/{job_id}")
 def update_job(job_id: int, body: JobPatch, db: Session = Depends(get_db), _: User = Depends(require_hr)):
     job = _job_or_404(db, job_id)
-    for field, value in body.model_dump(exclude_none=True).items():
+    changes = body.model_dump(exclude_none=True)
+    if "status" in changes and changes["status"] not in JOB_STATUSES:
+        raise HTTPException(400, f"Status must be one of {JOB_STATUSES}")
+    for field, value in changes.items():
         setattr(job, field, value)
     db.commit()
     return job_out(job)
@@ -97,22 +103,19 @@ def list_candidates(job_id: int, db: Session = Depends(get_db), _: User = Depend
 @router.post("/jobs/{job_id}/candidates", status_code=201)
 def add_candidate(job_id: int, body: CandidateIn, db: Session = Depends(get_db), _: User = Depends(require_hr)):
     _job_or_404(db, job_id)
-    cand = Candidate(job_id=job_id, **body.model_dump())
+    email = body.email.lower().strip()
+    if email and ("@" not in email or email.endswith("@")):
+        raise HTTPException(400, "That email address does not look valid")
+    cand = Candidate(job_id=job_id, name=body.name.strip(), email=email,
+                     resume_text=body.resume_text, source="manual")
     db.add(cand)
     db.commit()
     return candidate_out(cand)
 
 
 MAX_UPLOAD_BYTES = 2_000_000
-
-
-def _extract_text(filename: str, data: bytes) -> str:
-    if filename.lower().endswith(".pdf"):
-        from pypdf import PdfReader
-
-        reader = PdfReader(io.BytesIO(data))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
-    return data.decode("utf-8", errors="replace")
+MAX_UPLOAD_FILES = 20
+_MAX_TEXT_CHARS = 200_000
 
 
 @router.post("/jobs/{job_id}/candidates/upload", status_code=201)
@@ -121,6 +124,8 @@ async def upload_resumes(job_id: int, files: list[UploadFile], db: Session = Dep
     """Upload .txt or .pdf resumes. Names come from the top of the resume (or a cleaned-up
     file name); a resume already on this job (same email or same text) is skipped."""
     _job_or_404(db, job_id)
+    if len(files) > MAX_UPLOAD_FILES:
+        raise HTTPException(400, f"Upload at most {MAX_UPLOAD_FILES} files at a time")
     created, skipped = [], []
     existing = list(db.scalars(select(Candidate).where(Candidate.job_id == job_id)))
     seen_emails = {c.email.lower() for c in existing if c.email}
@@ -135,7 +140,7 @@ async def upload_resumes(job_id: int, files: list[UploadFile], db: Session = Dep
             skipped.append({"file": name, "reason": "file larger than 2 MB"})
             continue
         try:
-            text = _extract_text(name, data).strip()
+            text = extract_text(name, data)
         except Exception as exc:
             skipped.append({"file": name, "reason": f"could not read file: {exc}"})
             continue
@@ -150,7 +155,8 @@ async def upload_resumes(job_id: int, files: list[UploadFile], db: Session = Dep
         seen_texts.add(fp)
         if email:
             seen_emails.add(email)
-        cand = Candidate(job_id=job_id, name=guess_name(name, text), email=email, resume_text=text)
+        cand = Candidate(job_id=job_id, name=guess_name(name, text), email=email,
+                         resume_text=text, source="upload")
         db.add(cand)
         created.append(cand)
     db.commit()

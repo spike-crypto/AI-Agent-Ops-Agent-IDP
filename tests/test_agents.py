@@ -3,8 +3,8 @@ import pytest
 from app.agents.base import AgentContext, AgentPermissionError
 from app.agents.registry import AGENTS
 from app.db import SessionLocal
-from app.llm import FakeLLM
 from app.models import User
+from tests.stub_llm import StubLLM
 
 
 def add(client, hr, job_id, name, resume):
@@ -29,7 +29,7 @@ def test_screening_agent_never_sees_salary(job):
     with SessionLocal() as db:
         hr = db.query(User).filter_by(role="hr_admin").one()
         agent = AGENTS["screening"]
-        ctx = AgentContext(db, hr, FakeLLM(), agent.name, agent.scopes)
+        ctx = AgentContext(db, hr, StubLLM(), agent.name, agent.scopes)
         assert "salary_band" not in ctx.job(job["id"])
         with pytest.raises(AgentPermissionError):
             ctx.create_draft("offer", "x", "y")

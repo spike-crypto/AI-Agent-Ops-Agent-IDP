@@ -1,9 +1,13 @@
 fastapi
 uvicorn
 sqlalchemy>=2.0
-pyjwt
+alembic
+psycopg[binary]
+pyjwt[crypto]
 email-validator
 python-multipart
+python-dotenv
+httpx
 pypdf
 openai
 agentops

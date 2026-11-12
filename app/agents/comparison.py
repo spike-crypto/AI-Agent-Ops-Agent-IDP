@@ -38,10 +38,14 @@ class ComparisonAgent(Agent):
         )
         prompt = f"JOB: {job['title']}\n\nREQUIREMENTS:\n{job['requirements']}\n\nCANDIDATES:\n{blocks}"
 
+        ai_error = ""
         try:
             data = parse_json(ctx.llm.complete(SYSTEM, prompt, json_mode=True))
-        except LLMError:
+        except LLMError as exc:
+            # The comparison still works: the ranking comes from saved screening scores.
+            # Tell the UI the narrative part is missing instead of silently faking it.
             data = {}
+            ai_error = str(exc)
         by_id = {int(x.get("id", -1)): x for x in data.get("candidates", []) if isinstance(x, dict)}
 
         # Order by the screening score we already have, so the ranking is transparent
@@ -60,4 +64,5 @@ class ComparisonAgent(Agent):
                 for c in ordered
             ],
             "open_questions": [str(q) for q in data.get("open_questions", [])][:6],
+            "ai_error": ai_error,
         }
