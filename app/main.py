@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from app.config import settings
@@ -61,10 +62,24 @@ def ui():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.middleware("http")
+async def revalidate_ui(request, call_next):
+    """Make browsers check for a new UI on every load (cheap: unchanged files return 304 via ETag).
+    Without this, a browser can keep showing an old UI after a deploy."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 # --- Feature routers: add yours below this line ---
-from app.routers import agents, auth, drafts, interviews, jobs  # noqa: E402
+from app.routers import agents, auth, dashboard, drafts, interviews, jobs  # noqa: E402
 
 app.include_router(auth.router)
+app.include_router(dashboard.router)
 app.include_router(jobs.router)
 app.include_router(interviews.router)
 app.include_router(drafts.router)

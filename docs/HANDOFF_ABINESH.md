@@ -13,15 +13,16 @@
 code-along *"Build, Dockerize and Ship: CI/CD with GitHub PRs, GitHub Actions and a cloud host"*.
 We replaced the starter API with our own app. We deploy to **Render** instead of Railway.
 
-The app is for **one HR person** who runs hiring end to end. Four AI agents do the repetitive
-work, and the HR person makes every decision:
+The app is for **one HR person** who runs hiring end to end. Five AI agents ("assistants" in
+the UI) do the repetitive work, and the HR person makes every decision:
 
-| Agent | Job |
-|---|---|
-| `writing` | Drafts job descriptions, rejection emails, offer letters |
-| `screening` | Scores each resume against the job's requirements, with reasons |
-| `scheduling` | Creates an interview with proposed time slots, drafts the invite |
-| `feedback` | Finds interviews missing feedback, drafts reminders, summarises feedback |
+| Agent (code) | Name in the UI | Job |
+|---|---|---|
+| `writing` | AI Writer | Drafts job descriptions, rejection emails, offer letters |
+| `screening` | AI Screener | Scores each resume against the job's requirements, with reasons |
+| `scheduling` | AI Scheduler | Creates an interview with proposed time slots, drafts the invite |
+| `feedback` | AI Follow-up | Finds interviews missing feedback, drafts reminders, summarises feedback |
+| `comparison` | AI Comparer | Compares 2 to 4 candidates side by side. Read-only (Bala's Part H feature) |
 
 Three ideas run through the whole codebase. **Don't break them:**
 
@@ -40,13 +41,19 @@ on every deploy.
 
 ## 2. Status: what Bala already built (on `main`)
 
-- FastAPI backend, SQLite via SQLAlchemy 2, a single-page UI at `/` (`app/static/index.html`).
+- FastAPI backend, SQLite via SQLAlchemy 2.
+- **The HR cockpit UI** at `/`: `app/static/index.html` (shell), `app.css` (design tokens and
+  components), `app.js` (all views, vanilla JS, no build step). Icons come from **Lucide**,
+  vendored at `app/static/vendor/lucide.min.js`: write `${icon("name")}` and the page paints it.
+  Views: Today (what needs you), Candidates (stage board + candidate drawer + compare),
+  Jobs, Interviews, Review queue (approve drafts), AI activity (permissions + log), Team, How it works.
+- `GET /dashboard` (`app/routers/dashboard.py`) powers the Today view.
 - **Auth:** email + password (PBKDF2) → JWT bearer token. Roles: `hr_admin`, `interviewer`.
   `app/deps.py` has `get_current_user`, `require_hr`, `require_role(...)`.
 - The 4 agents, the scoped `AgentContext`, the runner, the AgentRun audit log, AgentOps.
 - LLM via **OpenRouter** free models (`app/llm.py`), with a `FakeLLM` that works offline.
   **Tests and CI always use FakeLLM.** Never call a real API from tests.
-- 17 pytest tests (`tests/`), Dockerfile, `render.yaml`.
+- 24 pytest tests (`tests/`), Dockerfile, `render.yaml`.
 - CI/CD per the code-along PDF: `ci.yml` (job `test`: pytest + docker build on every PR) and
   `deploy.yml` (on push to main: test → Render deploy hook with the commit SHA → smoke test
   that waits for `/health` to report that commit).
@@ -66,9 +73,9 @@ app/
     base.py            SCOPES, ROLE_SCOPES, AgentContext (the only data access agents get), Agent base class
     registry.py        AGENTS = {...}: every agent is registered here  <-- shared file
     runner.py          run_agent(): role check, scoped context, trace, audit row
-    writing.py, screening.py, scheduling.py, feedback.py
-  routers/             auth, jobs (+candidates), interviews, drafts, agents
-  static/index.html    the whole UI (vanilla JS)
+    writing.py, screening.py, scheduling.py, feedback.py, comparison.py
+  routers/             auth, dashboard, jobs (+candidates), interviews, drafts, agents
+  static/              index.html, app.css, app.js (the cockpit UI), vendor/lucide.min.js (icons)
 tests/                 conftest.py has fixtures: client, hr, interviewer, job
 ```
 
@@ -86,8 +93,8 @@ Each action is a method on the agent class, listed in its `actions` tuple.
 
 ## 5. Your feature
 
-> **Suggested.** Agree it with Bala; replace this section if you pick something else.
-> Any feature must follow section 6.
+> Tracked in the GitHub issue assigned to you ("Interview kit agent"). Any feature must
+> follow section 6. Start after Bala's cockpit UI PR is merged, so you build on the new UI.
 
 ### Interview-kit agent
 
@@ -102,8 +109,12 @@ Before an interview, the interviewer gets a tailored set of questions for that c
   get `job:salary:read`. Add any new `AgentContext` method you need (e.g. `interview(id)`),
   and make it call `self.require(...)` first, like the existing ones.
 - Register it in `app/agents/registry.py`.
-- UI: a "🧩 Interview kit" button on each row in the Interviews tab that calls
-  `POST /agents/interview_kit/prepare`.
+- UI (`app/static/app.js`):
+  - add `interview_kit: { label: "AI Interview kit", icon: "clipboard-check", does: "..." }`
+    to the `ASSISTANTS` map (`DRAFT_KIND` already has `interview_kit`);
+  - in `viewInterviews`, add a `btn ai sm` button "Prepare interview kit" with
+    `${icon("clipboard-check")}` to each row, calling `POST /agents/interview_kit/prepare`
+    through the existing `act(...)` helper, then `go("review")` so HR sees the draft.
 - **Tests** (`tests/test_interview_kit.py`): it creates a pending draft; it never receives
   `salary_band`; an interviewer calling it gets 403 and an AgentRun row with status `denied`;
   an unknown `interview_id` gives 404.
@@ -124,6 +135,11 @@ Before an interview, the interviewer gets a tailored set of questions for that c
 7. **Keep the job named `test`** in `ci.yml`. Branch protection depends on that name.
 8. Don't add a database server, background workers or a second container. It's one container.
 9. Keep using the fake resumes in `sample_data/`, never real people's resumes.
+10. **UI rules:** no emoji anywhere. Icons only from Lucide (`icon("name")`, names at
+    lucide.dev/icons). Anything an AI wrote or suggested is violet (`btn ai`, `tag ai`, `ai-note`);
+    amber means "waiting on you"; green means done. Copy is plain, sentence case, written for an
+    HR person, not a developer ("Prepare interview kit", not "Run interview_kit.prepare").
+11. Commits: no AI-tool attribution lines (no "Co-Authored-By: Claude" or similar).
 
 ## 7. Setup and daily workflow
 
