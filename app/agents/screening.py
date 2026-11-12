@@ -18,10 +18,15 @@ class ScreeningAgent(Agent):
     scopes = frozenset({"job:read", "candidate:read", "candidate:write"})
     actions = ("screen",)
 
-    def screen(self, ctx: AgentContext, job_id: int, rescreen: bool = False) -> dict:
+    def screen(self, ctx: AgentContext, job_id: int, rescreen: bool = False,
+               limit: int | None = None, exclude_ids: list[int] | None = None) -> dict:
+        """Screen new resumes. With `limit`, only that many are done per call so the UI can
+        show progress and no request runs for minutes; `exclude_ids` skips ones that failed."""
         job = ctx.job(job_id)
         statuses = None if rescreen else ("new",)
-        candidates = ctx.candidates_for_job(job_id, statuses)
+        skip = {int(i) for i in (exclude_ids or [])}
+        todo = [c for c in ctx.candidates_for_job(job_id, statuses) if c.id not in skip]
+        candidates = todo[: max(1, int(limit))] if limit else todo
         failed = []
         for cand in candidates:
             prompt = (
@@ -49,4 +54,6 @@ class ScreeningAgent(Agent):
             "ranked": [{"id": c.id, "name": c.name, "score": c.score, "status": c.status,
                         "screening": c.screening} for c in ranked],
             "failed": failed,
+            "processed": len(candidates),
+            "remaining": len(todo) - len(candidates),
         }

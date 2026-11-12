@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import get_current_user, require_hr
 from app.models import CANDIDATE_STATUSES, Candidate, Interview, Job, User
+from app.resume_parsing import find_email, fingerprint, guess_name
 
 router = APIRouter(tags=["jobs & candidates"])
 
@@ -117,9 +118,13 @@ def _extract_text(filename: str, data: bytes) -> str:
 @router.post("/jobs/{job_id}/candidates/upload", status_code=201)
 async def upload_resumes(job_id: int, files: list[UploadFile], db: Session = Depends(get_db),
                          _: User = Depends(require_hr)):
-    """Upload .txt or .pdf resumes. The file name becomes the candidate name (edit later)."""
+    """Upload .txt or .pdf resumes. Names come from the top of the resume (or a cleaned-up
+    file name); a resume already on this job (same email or same text) is skipped."""
     _job_or_404(db, job_id)
     created, skipped = [], []
+    existing = list(db.scalars(select(Candidate).where(Candidate.job_id == job_id)))
+    seen_emails = {c.email.lower() for c in existing if c.email}
+    seen_texts = {fingerprint(c.resume_text) for c in existing}
     for f in files:
         name = f.filename or "resume"
         if not name.lower().endswith((".txt", ".pdf", ".md")):
@@ -137,9 +142,15 @@ async def upload_resumes(job_id: int, files: list[UploadFile], db: Session = Dep
         if not text:
             skipped.append({"file": name, "reason": "no text found (scanned PDF?)"})
             continue
-        email = next((w.strip(".,;()<>") for w in text.split() if "@" in w and "." in w), "")
-        display = name.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").title()
-        cand = Candidate(job_id=job_id, name=display, email=email, resume_text=text)
+        email = find_email(text)
+        fp = fingerprint(text)
+        if fp in seen_texts or (email and email in seen_emails):
+            skipped.append({"file": name, "reason": "already added to this job"})
+            continue
+        seen_texts.add(fp)
+        if email:
+            seen_emails.add(email)
+        cand = Candidate(job_id=job_id, name=guess_name(name, text), email=email, resume_text=text)
         db.add(cand)
         created.append(cand)
     db.commit()
