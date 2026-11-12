@@ -66,7 +66,7 @@
   | writing | AI Writer | job_description, rejection, offer | job:read, job:salary:read, candidate:read, draft:write |
   | screening | AI Screener | screen | job:read, candidate:read, candidate:write |
   | scheduling | AI Scheduler | propose | job:read, candidate:read, interview:write, draft:write |
-  | feedback | AI Follow-up | chase, summarize | candidate:read, candidate:write, interview:read, feedback:read, draft:write |
+  | feedback | AI Follow-up | chase, summarize, synthesize (decision memo, Abinesh) | job:read, candidate:read, candidate:write, interview:read, feedback:read, draft:write |
   | comparison | AI Comparer | compare (2-4 ids) | job:read, candidate:read (read-only). Bala's Part H |
   | interview_kit | AI Interview Kit | prepare (interview_id) | job:read, candidate:read, interview:read, draft:write. Abinesh's Part H |
 

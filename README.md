@@ -9,7 +9,7 @@ or interviewer until they have approved it.
 | **writing** | Drafts job descriptions, rejection emails and offer letters | job:read, **job:salary:read**, candidate:read, draft:write |
 | **screening** | Scores every resume against the job's requirements, with reasons | job:read, candidate:read, candidate:write |
 | **scheduling** | Creates an interview with proposed slots and drafts the invite | job:read, candidate:read, interview:write, draft:write |
-| **feedback** | Finds interviews with missing feedback, drafts reminders, summarises feedback | candidate:read, candidate:write, interview:read, feedback:read, draft:write |
+| **feedback** | Finds interviews with missing feedback, drafts reminders, summarises feedback, and synthesises a hiring decision memo from the interviewers' notes | job:read, candidate:read, candidate:write, interview:read, feedback:read, draft:write |
 | **comparison** | Compares 2 to 4 candidates for one job side by side (read-only) | job:read, candidate:read |
 | **interview_kit** | Prepares tailored interview questions and a rubric, addressed to the interviewer | job:read, candidate:read, interview:read, draft:write |
 
