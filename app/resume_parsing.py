@@ -1,7 +1,10 @@
 """Small, dependency-free helpers for turning an uploaded resume into a candidate."""
 
 import hashlib
+import io
 import re
+
+MAX_RESUME_CHARS = 200_000
 
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _BRACKETS = re.compile(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}")
@@ -17,6 +20,18 @@ _NOT_A_NAME = {
     "consultant", "specialist", "scientist", "architect", "lead", "senior", "junior", "full", "stack",
     "software", "data", "graphic", "personal", "details", "information",
 }
+
+
+def extract_text(filename: str, data: bytes) -> str:
+    """Text from a .pdf, or UTF-8 text from .txt/.md. Raises on an unreadable PDF."""
+    if filename.lower().endswith(".pdf"):
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(data))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    else:
+        text = data.decode("utf-8", errors="replace")
+    return text.strip()[:MAX_RESUME_CHARS]
 
 
 def find_email(text: str) -> str:

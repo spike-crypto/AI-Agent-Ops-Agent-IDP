@@ -1,5 +1,11 @@
 # Render Blueprint: New > Blueprint in the Render dashboard, pick this repo.
 # Secret values (sync: false) are asked for once, when you create the Blueprint.
+databases:
+  - name: hiring-desk-db
+    plan: free
+    databaseName: hiring_desk
+    user: hiring_desk
+
 services:
   - type: web
     name: hiring-desk
@@ -11,6 +17,18 @@ services:
     # or every merge deploys twice.
     autoDeployTrigger: off
     envVars:
+      - key: APP_ENV
+        value: production
+      - key: COMPANY_NAME
+        value: Hiring Desk
+      - key: LOG_JSON
+        value: "true"
+      # Postgres survives deploys; SQLite inside the container did not. Alembic upgrades
+      # an existing database in place on startup, so schema changes never wipe data.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hiring-desk-db
+          property: connectionString
       - key: JWT_SECRET
         generateValue: true
       - key: ADMIN_EMAIL

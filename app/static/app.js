@@ -53,12 +53,36 @@ function toast(msg, { error = false, ms = 4200 } = {}) {
   clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = "none"), ms);
 }
 
+let refreshing = null;
+
+/* The access token lives 15 minutes; the httpOnly refresh cookie keeps people signed in. */
+async function refreshSession() {
+  refreshing = refreshing || (async () => {
+    try {
+      const res = await fetch("/auth/refresh", { method: "POST", credentials: "same-origin" });
+      if (!res.ok) return null;
+      const data = await res.json();
+      state.token = data.access_token;
+      state.user = data.user;
+      store.set("token", data.access_token);
+      return data.access_token;
+    } catch { return null; }
+    finally { refreshing = null; }
+  })();
+  return refreshing;
+}
+
 async function api(path, opts = {}) {
   const isForm = opts.body instanceof FormData;
-  const headers = isForm ? {} : { "Content-Type": "application/json" };
-  if (state.token) headers.Authorization = "Bearer " + state.token;
-  const res = await fetch(path, { ...opts, headers, body: isForm ? opts.body : opts.body && JSON.stringify(opts.body) });
-  if (res.status === 401 && path !== "/auth/login") { signOut(); throw new Error("Your session ended. Sign in again."); }
+  const send = () => {
+    const headers = isForm ? {} : { "Content-Type": "application/json" };
+    if (state.token) headers.Authorization = "Bearer " + state.token;
+    return fetch(path, { ...opts, headers, body: isForm ? opts.body : opts.body && JSON.stringify(opts.body) });
+  };
+  let res = await send();
+  const noRenew = ["/auth/login", "/auth/refresh", "/auth/mfa/verify"];
+  if (res.status === 401 && !noRenew.includes(path) && await refreshSession()) res = await send();
+  if (res.status === 401 && !noRenew.includes(path)) { signOut(); throw new Error("Your session ended. Sign in again."); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const d = data.detail;
@@ -79,7 +103,14 @@ async function act(btn, fn, { working = "Working", slow = false } = {}) {
 }
 
 function go(view, extra = {}) { Object.assign(state, extra, { view }); closeDrawer(); render(); window.scrollTo(0, 0); }
-function signOut() { state.token = null; state.user = null; store.set("token", null); render(); }
+function signOut() {
+  fetch("/auth/logout", { method: "POST", credentials: "same-origin", keepalive: true }).catch(() => {});
+  state.token = null; state.user = null; store.set("token", null); render();
+}
+async function signOutEverywhere() {
+  try { await api("/auth/logout-all", { method: "POST" }); } catch { /* already signed out */ }
+  state.token = null; state.user = null; store.set("token", null); render();
+}
 
 const fmtWhen = iso => {
   if (!iso) return "";
@@ -90,7 +121,15 @@ const initials = name => (name || "?").split(/\s+/).map(p => p[0]).slice(0, 2).j
 const isPast = iso => iso && new Date(iso) <= new Date();
 
 /* ---------- sign in ---------- */
-function viewLogin() {
+let authConfig = { oidc_enabled: false, oidc_button_label: "Sign in with SSO" };
+
+function finishLogin(r) {
+  state.token = r.access_token; state.user = r.user; store.set("token", r.access_token);
+  state.view = r.user.role === "hr_admin" ? "today" : "mine";
+  render();
+}
+
+function loginShell(slot) {
   $("#app").innerHTML = `
   <div class="login-wrap">
     <section class="login-side">
@@ -108,27 +147,131 @@ function viewLogin() {
       </div>
       <p class="small" style="opacity:.8">Prototype. Use sample resumes only.</p>
     </section>
-    <section class="login-form">
-      <form id="login" novalidate>
-        <div><h2>Sign in</h2><p class="muted small" style="margin-top:4px">Use the account your HR admin gave you.</p></div>
-        <label class="field">Email<input name="email" type="email" autocomplete="username" required autofocus></label>
-        <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
-        <p id="login-error" class="small" style="color:var(--bad)" role="alert"></p>
-        <button class="btn" type="submit">${icon("log-in")} Sign in</button>
-      </form>
-    </section>
+    <section class="login-form">${slot}</section>
   </div>`;
   paintIcons();
+}
+
+function renderSignIn() {
+  loginShell(`
+    <form id="login" novalidate style="display:grid;gap:14px">
+      <div><h2>Sign in</h2><p class="muted small" style="margin-top:4px">Use the account your HR admin gave you.</p></div>
+      <label class="field">Email<input name="email" type="email" autocomplete="username" required autofocus></label>
+      <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <p id="login-error" class="small" style="color:var(--bad)" role="alert"></p>
+      <button class="btn" type="submit">${icon("log-in")} Sign in</button>
+      ${authConfig.oidc_enabled ? `<a class="btn secondary" href="/auth/oidc/login">${icon("shield-check")} ${esc(authConfig.oidc_button_label)}</a>` : ""}
+      <button type="button" class="linkish" id="forgot">Forgot your password?</button>
+    </form>`);
   $("#login").onsubmit = async e => {
     e.preventDefault();
     const f = new FormData(e.target);
+    const btn = $("button[type=submit]", e.target);
+    btn.disabled = true;
     try {
       const r = await api("/auth/login", { method: "POST", body: { email: f.get("email"), password: f.get("password") } });
-      state.token = r.access_token; state.user = r.user; store.set("token", r.access_token);
-      state.view = r.user.role === "hr_admin" ? "today" : "mine";
-      render();
-    } catch (err) { $("#login-error").textContent = err.message; }
+      if (r.mfa_required) return renderMfa(r.mfa_token);
+      finishLogin(r);
+    } catch (err) {
+      $("#login-error").textContent = err.message;
+      btn.disabled = false;
+    }
   };
+  $("#forgot").onclick = renderForgot;
+}
+
+function renderMfa(mfaToken) {
+  loginShell(`
+    <form id="mfa" novalidate style="display:grid;gap:14px">
+      <div><h2>Enter your code</h2><p class="muted small" style="margin-top:4px">Open your authenticator app and type the 6-digit code. A recovery code also works.</p></div>
+      <label class="field">Code<input name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus maxlength="9" placeholder="123456"></label>
+      <p id="mfa-error" class="small" style="color:var(--bad)" role="alert"></p>
+      <button class="btn" type="submit">${icon("shield-check")} Verify</button>
+      <button type="button" class="linkish" id="back">Back to sign in</button>
+    </form>`);
+  $("#back").onclick = renderSignIn;
+  $("#mfa").onsubmit = async e => {
+    e.preventDefault();
+    const btn = $("button[type=submit]", e.target);
+    btn.disabled = true;
+    try {
+      finishLogin(await api("/auth/mfa/verify", { method: "POST",
+        body: { mfa_token: mfaToken, code: new FormData(e.target).get("code").trim() } }));
+    } catch (err) {
+      $("#mfa-error").textContent = err.message;
+      btn.disabled = false;
+    }
+  };
+}
+
+function renderForgot() {
+  loginShell(`
+    <form id="forgot-form" novalidate style="display:grid;gap:14px">
+      <div><h2>Reset your password</h2><p class="muted small" style="margin-top:4px">We will create a one-time link. Ask your HR admin to send it to you if you do not receive one.</p></div>
+      <label class="field">Work email<input name="email" type="email" autocomplete="username" required autofocus></label>
+      <p id="forgot-msg" class="small" role="status"></p>
+      <button class="btn" type="submit">${icon("mail")} Create reset link</button>
+      <button type="button" class="linkish" id="back">Back to sign in</button>
+    </form>`);
+  $("#back").onclick = renderSignIn;
+  $("#forgot-form").onsubmit = async e => {
+    e.preventDefault();
+    const btn = $("button[type=submit]", e.target);
+    btn.disabled = true;
+    try {
+      const r = await api("/auth/forgot-password", { method: "POST",
+        body: { email: new FormData(e.target).get("email") } });
+      $("#forgot-msg").innerHTML = esc(r.message);
+      if (r.reset_token) {
+        $("#forgot-msg").innerHTML += `<br><a href="/?reset=${encodeURIComponent(r.reset_token)}">Open the reset link (shown in development only)</a>`;
+      }
+    } catch (err) {
+      $("#forgot-msg").textContent = err.message;
+      btn.disabled = false;
+    }
+  };
+}
+
+function renderReset(token) {
+  loginShell(`
+    <form id="reset-form" novalidate style="display:grid;gap:14px">
+      <div><h2>Choose a new password</h2><p class="muted small" style="margin-top:4px">At least 8 characters. Every other session will be signed out.</p></div>
+      <label class="field">New password<input name="password" type="password" autocomplete="new-password" minlength="8" required autofocus></label>
+      <label class="field">Repeat password<input name="confirm" type="password" autocomplete="new-password" minlength="8" required></label>
+      <p id="reset-error" class="small" style="color:var(--bad)" role="alert"></p>
+      <button class="btn" type="submit">${icon("key-round")} Save password</button>
+    </form>`);
+  $("#reset-form").onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    if (f.get("password") !== f.get("confirm")) {
+      $("#reset-error").textContent = "The two passwords are different.";
+      return;
+    }
+    const btn = $("button[type=submit]", e.target);
+    btn.disabled = true;
+    try {
+      await api("/auth/reset-password", { method: "POST",
+        body: { token, new_password: f.get("password") } });
+      history.replaceState({}, "", "/");
+      toast("Password changed. Sign in with the new one.");
+      renderSignIn();
+    } catch (err) {
+      $("#reset-error").textContent = err.message;
+      btn.disabled = false;
+    }
+  };
+}
+
+async function viewLogin() {
+  loginShell(`<p class="muted small">Loading&hellip;</p>`);
+  try { authConfig = await api("/auth/config"); } catch { /* defaults are fine */ }
+  const resetToken = new URLSearchParams(location.search).get("reset");
+  if (resetToken) return renderReset(resetToken);
+  const sso = new URLSearchParams(location.search).get("sso");
+  if (sso === "denied") toast("That sign-in was cancelled.", { error: true });
+  if (sso === "error") toast("Single sign-on could not verify you. Try again or use your password.", { error: true });
+  renderSignIn();
 }
 
 /* ---------- shell ---------- */
@@ -293,6 +436,8 @@ function openNewJob() {
         <div class="form-grid">
           <label class="field">Job title<input name="title" required placeholder="Backend engineer"></label>
           <label class="field">Team or department<input name="department" placeholder="Engineering"></label>
+          <label class="field">Location <span class="hint">Shown on your public careers page.</span>
+            <input name="location" placeholder="Remote or Bengaluru"></label>
           <label class="field full">Must-have skills and experience
             <span class="hint">The AI Screener scores every resume against exactly this list. Be specific.</span>
             <textarea name="requirements" required placeholder="Python, FastAPI, Docker, PostgreSQL, 3+ years building APIs"></textarea></label>
@@ -320,10 +465,16 @@ async function viewJobs() {
     ${jobs.length ? `<div class="stack">${jobs.map(j => `
       <section class="panel">
         <div class="panel-head"><h2>${esc(j.title)}</h2>${j.department ? `<span class="tag">${esc(j.department)}</span>` : ""}
-          <div class="actions"><button class="btn secondary sm" data-cands="${j.id}">${icon("users")} Candidates</button></div></div>
+          ${j.published ? `<span class="tag done">${icon("globe")}Live on careers page</span>` : `<span class="tag">Only visible to your team</span>`}
+          <div class="actions"><a class="btn ghost sm" href="/careers" target="_blank" rel="noopener">${icon("external-link")}Careers page</a>
+            <button class="btn secondary sm" data-cands="${j.id}">${icon("users")} Candidates</button></div></div>
         <div class="panel-pad form-grid">
           <label class="field full">Must-have skills and experience<textarea data-req="${j.id}">${esc(j.requirements)}</textarea></label>
+          <label class="field">Location <span class="hint">Shown on the careers page.</span><input data-loc="${j.id}" value="${esc(j.location || "")}"></label>
           <label class="field">Salary band <span class="hint">Private. Used only for offer letters.</span><input data-sal="${j.id}" value="${esc(j.salary_band)}"></label>
+          <label class="field">Public hiring page
+            <span class="hint">Free ATS: anyone with the link can see this role and apply.</span>
+            <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" data-pub="${j.id}" ${j.published ? "checked" : ""} style="width:auto"> Publish this job</span></label>
           <div style="display:flex;align-items:end"><button class="btn secondary sm" data-save="${j.id}">${icon("check")} Save changes</button></div>
           <div class="full">
             <div class="section-title"><h3>Job description</h3>${j.description ? `<span class="tag done">${icon("badge-check")}Approved by you</span>` : `<span class="tag wait">Not written yet</span>`}</div>
@@ -336,9 +487,19 @@ async function viewJobs() {
   $("#newjob").onclick = openNewJob;
   $("#newjob2") && ($("#newjob2").onclick = openNewJob);
   $$("[data-cands]").forEach(b => (b.onclick = () => go("candidates", { jobId: +b.dataset.cands })));
+  $$("[data-pub]").forEach(cb => (cb.onchange = async () => {
+    try {
+      await api(`/jobs/${cb.dataset.pub}`, { method: "PATCH", body: { published: cb.checked } });
+      toast(cb.checked ? "The job is live on your careers page." : "Removed from the careers page.");
+      render();
+    } catch (err) { cb.checked = !cb.checked; toast(err.message, { error: true }); }
+  }));
   $$("[data-save]").forEach(b => (b.onclick = () => act(b, async () => {
     const id = b.dataset.save;
-    await api(`/jobs/${id}`, { method: "PATCH", body: { requirements: $(`[data-req="${id}"]`).value, salary_band: $(`[data-sal="${id}"]`).value } });
+    await api(`/jobs/${id}`, { method: "PATCH", body: {
+      requirements: $(`[data-req="${id}"]`).value,
+      location: $(`[data-loc="${id}"]`).value,
+      salary_band: $(`[data-sal="${id}"]`).value } });
     toast("Changes saved");
   }, { working: "Saving" })));
   $$("[data-jd]").forEach(b => (b.onclick = () => act(b, async () => {
@@ -415,25 +576,29 @@ async function viewCandidates() {
   renderSelectionBar();
 }
 
-/* Screens a job's new resumes a few at a time, showing "Screened 4 of 20" on the button.
-   Free AI models take ~40 s per resume, so one big request would hang for many minutes. */
-const SCREEN_BATCH = 2;
+/* Screening runs as a background job (a batch of 40 free-model calls would hold a
+   request open for many minutes), so the button polls the job's progress instead. */
 async function screenJob(jobId, btn) {
-  const failedIds = [];
-  let done = 0, total = null;
   await act(btn, async () => {
-    for (;;) {
-      const r = await api("/agents/screening/screen", { method: "POST",
-        body: { job_id: jobId, limit: SCREEN_BATCH, exclude_ids: failedIds } });
-      r.failed.forEach(f => failedIds.push(f.candidate_id));
-      done += r.processed;
-      if (total === null) total = r.processed + r.remaining;
-      if (btn.isConnected) { btn.innerHTML = `${icon("refresh-cw", "spin")} Screened ${done} of ${total}`; paintIcons(); }
-      if (!r.remaining || !r.processed) break;
+    let job = await api("/agent-jobs", { method: "POST",
+      body: { agent: "screening", action: "screen", params: { job_id: jobId } } });
+    const deadline = Date.now() + 20 * 60 * 1000;
+    while (!["done", "error", "cancelled"].includes(job.status)) {
+      if (Date.now() > deadline) throw new Error("Screening is taking unusually long. Check AI activity, or try again.");
+      await new Promise(r => setTimeout(r, 1500));
+      job = await api(`/agent-jobs/${job.id}`);
+      if (btn.isConnected && job.progress_total) {
+        btn.innerHTML = `${icon("refresh-cw", "spin")} Screened ${job.progress_current} of ${job.progress_total}`;
+        paintIcons();
+      }
     }
-    const ok = done - failedIds.length;
-    toast(failedIds.length
-      ? `Screened ${ok} of ${total}. ${plural(failedIds.length, "resume", "resumes")} could not be read by the AI; try again later.`
+    if (job.status === "error") throw new Error(job.error || "The screening job failed");
+    if (job.status === "cancelled") { toast("Screening stopped. Resumes that were already scored are kept."); return; }
+    const r = job.result || {};
+    const failed = (r.failed || []).length;
+    const ok = (r.processed || 0) - failed;
+    toast(failed
+      ? `Screened ${ok} of ${r.processed}. ${plural(failed, "resume", "resumes")} could not be read; try again later.`
       : `Screened ${plural(ok, "resume", "resumes")}. Open a candidate to see why.`, { ms: 7000 });
   }, { working: "Starting", slow: true });
   render();
@@ -447,6 +612,7 @@ function card(c) {
       <span class="card-name" title="${esc(c.name)}">${esc(c.name)}</span>
       <span class="score ${c.score == null ? "none" : ""}" title="${c.score == null ? "Not screened yet" : "AI Screener score out of 100"}">${c.score ?? "–"}</span>
     </div>
+    ${c.source === "careers" ? `<div class="small muted">${icon("globe")} Applied on the careers page</div>` : ""}
     ${c.screening?.summary ? `<div class="card-sum">${esc(c.screening.summary)}</div>` : ""}
   </div>`;
 }
@@ -507,7 +673,8 @@ async function openCandidate(id) {
         <div class="avatar" style="width:42px;height:42px;font-size:15px">${esc(initials(c.name))}</div>
         <div style="flex:1;min-width:0"><h2 id="dr-h">${esc(c.name)}</h2>
           <div class="small muted">${esc(c.email || "No email found in resume")}</div>
-          <div style="margin-top:6px"><span class="tag">${esc(STAGE_LABEL[s] || s)}</span></div></div>
+          <div style="margin-top:6px"><span class="tag">${esc(STAGE_LABEL[s] || s)}</span>
+            ${c.source === "careers" ? `<span class="tag">${icon("globe")}Careers page</span>` : ""}</div></div>
         <button class="btn ghost sm" data-closedrawer aria-label="Close">${icon("x")}</button>
       </div>
       <div class="drawer-body">
@@ -706,6 +873,61 @@ async function viewActivity() {
 }
 
 /* ---------- Team ---------- */
+function openMfaSetup() {
+  act($("#mfa-toggle"), async () => {
+    const setup = await api("/auth/mfa/setup", { method: "POST" });
+    openModal(`
+      <form id="mfa-enable">
+        <div class="modal-head">${icon("shield-check")}<h2>Turn on two-factor</h2></div>
+        <div class="modal-body stack" style="gap:12px">
+          <p class="small muted">Add this key to an authenticator app (Google Authenticator, 1Password, Authy), then type the 6-digit code it shows.</p>
+          <label class="field">Setup key<input readonly value="${esc(setup.secret)}" style="font-family:monospace"></label>
+          <label class="field">Code<input name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="6" placeholder="123456" autofocus></label>
+        </div>
+        <div class="modal-foot"><button type="button" class="btn secondary" data-close>Cancel</button><button class="btn">${icon("shield-check")} Turn on</button></div>
+      </form>`);
+    $("#mfa-enable").onsubmit = e => {
+      e.preventDefault();
+      act($("button[type=submit]", e.target), async () => {
+        const r = await api("/auth/mfa/enable", { method: "POST",
+          body: { code: new FormData(e.target).get("code").trim() } });
+        closeModal();
+        state.user.mfa_enabled = true;
+        render();
+        openModal(`
+          <div class="modal-head">${icon("shield-check")}<h2>Two-factor is on</h2></div>
+          <div class="modal-body stack" style="gap:12px">
+            <p>Save these recovery codes somewhere safe. Each one works once if you lose your phone.</p>
+            <pre class="resume">${esc(r.recovery_codes.join("\n"))}</pre>
+          </div>
+          <div class="modal-foot"><button class="btn" data-close>I saved them</button></div>`);
+      }, { working: "Turning on" });
+    };
+  }, { working: "Preparing" });
+}
+
+function openMfaDisable() {
+  openModal(`
+    <form id="mfa-disable">
+      <div class="modal-head">${icon("shield-off")}<h2>Turn off two-factor</h2></div>
+      <div class="modal-body stack" style="gap:12px">
+        <label class="field">Your password<input name="password" type="password" autocomplete="current-password" required></label>
+        <label class="field">Current code<input name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="9" placeholder="123456"></label>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn secondary" data-close>Cancel</button><button class="btn danger">Turn off</button></div>
+    </form>`);
+  $("#mfa-disable").onsubmit = e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    act($("button[type=submit]", e.target), async () => {
+      const r = await api("/auth/mfa/disable", { method: "POST",
+        body: { password: f.get("password"), code: f.get("code").trim() } });
+      state.token = r.access_token; state.user = r.user; store.set("token", r.access_token);
+      closeModal(); render(); toast("Two-factor is off.");
+    }, { working: "Turning off" });
+  };
+}
+
 async function viewTeam() {
   const users = await api("/users");
   $("#main").innerHTML = `
@@ -713,9 +935,11 @@ async function viewTeam() {
     <div class="stack">
       <section class="panel"><div style="overflow-x:auto"><table><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>
         ${users.map(u => `<tr><td><div class="who"><div class="avatar">${esc(initials(u.name))}</div><b>${esc(u.name)}</b></div></td>
-          <td>${esc(u.email)}</td><td><span class="tag">${u.role === "hr_admin" ? "HR admin" : "Interviewer"}</span></td>
-          <td style="text-align:right">${!u.is_active ? `<span class="muted small">Deactivated</span>` : u.id === state.user.id ? `<span class="muted small">You</span>`
-            : `<button class="btn danger sm" data-off="${u.id}">${icon("user-x")} Deactivate</button>`}</td></tr>`).join("")}
+          <td>${esc(u.email)}</td><td><span class="tag">${u.role === "hr_admin" ? "HR admin" : "Interviewer"}</span>
+            ${u.mfa_enabled ? `<span class="tag done">${icon("shield-check")}2FA</span>` : ""}</td>
+          <td style="text-align:right;white-space:nowrap">${!u.is_active ? `<span class="muted small">Deactivated</span>` : `
+            <button class="btn secondary sm" data-reset="${u.id}">${icon("key-round")} Reset password</button>
+            ${u.id === state.user.id ? `<span class="muted small">You</span>` : `<button class="btn danger sm" data-off="${u.id}">${icon("user-x")} Deactivate</button>`}`}</td></tr>`).join("")}
       </table></div></section>
       <section class="panel"><div class="panel-head"><h2>Add a person</h2></div>
         <form id="userform" class="panel-pad form-grid">
@@ -725,17 +949,38 @@ async function viewTeam() {
           <label class="field">Role<select name="role"><option value="interviewer">Interviewer</option><option value="hr_admin">HR admin</option></select></label>
           <div class="full"><button class="btn">${icon("plus")} Add person</button></div>
         </form></section>
+      <section class="panel"><div class="panel-head"><h2>Your account security</h2></div>
+        <div class="panel-pad stack" style="gap:12px">
+          <div class="info-note">${icon("shield-check")}<div><b>Two-factor authentication.</b>
+            ${state.user.mfa_enabled ? "On. You are asked for a code each time you sign in." : "Off. Add a second step to protect HR data and candidate details."}</div></div>
+          <div class="actions">
+            <button class="btn ${state.user.mfa_enabled ? "secondary" : ""}" id="mfa-toggle">${icon("shield-check")} ${state.user.mfa_enabled ? "Turn off two-factor" : "Turn on two-factor"}</button>
+            <button class="btn ghost" id="signout-all">${icon("log-out")} Sign out everywhere</button>
+          </div>
+        </div></section>
     </div>`;
   $("#userform").onsubmit = e => {
     e.preventDefault();
     act($("button", e.target), async () => {
       const u = await api("/users", { method: "POST", body: Object.fromEntries(new FormData(e.target)) });
-      toast(`${u.name} added. They can sign in now.`); render();
+      toast(`${u.name} added. Share the temporary password with them privately.`); render();
     }, { working: "Adding" });
   };
   $$("[data-off]").forEach(b => (b.onclick = () => act(b, async () => {
     await api(`/users/${b.dataset.off}/deactivate`, { method: "POST" }); toast("Deactivated. They can no longer sign in."); render();
   }, { working: "Deactivating" })));
+  $$("[data-reset]").forEach(b => (b.onclick = () => act(b, async () => {
+    const r = await api(`/users/${b.dataset.reset}/password-reset`, { method: "POST" });
+    openModal(`
+      <div class="modal-head">${icon("key-round")}<h2>One-time reset link</h2></div>
+      <div class="modal-body stack" style="gap:12px">
+        <p class="small muted">Send this link to <b>${esc(r.user.name)}</b> through a channel you trust. It expires ${esc(fmtWhen(r.expires_at))} and works once.</p>
+        <label class="field">Link<input readonly value="${esc(r.reset_url)}" autofocus></label>
+      </div>
+      <div class="modal-foot"><button class="btn" data-close>Done</button></div>`);
+  }, { working: "Creating" })));
+  $("#mfa-toggle").onclick = () => state.user.mfa_enabled ? openMfaDisable() : openMfaSetup();
+  $("#signout-all").onclick = () => signOutEverywhere();
 }
 
 /* ---------- How it works ---------- */

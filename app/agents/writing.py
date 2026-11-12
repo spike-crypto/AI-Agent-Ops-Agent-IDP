@@ -39,7 +39,7 @@ class WritingAgent(Agent):
 
     def offer(self, ctx: AgentContext, candidate_id: int, start_date: str = "", notes: str = "") -> dict:
         cand = ctx.candidate(candidate_id)
-        job = ctx.job(cand.job_id)
+        job = ctx.job(cand.job_id, include_salary=True)
         if not job.get("salary_band"):
             raise ValueError("Set a salary band on the job before drafting an offer")
         prompt = (

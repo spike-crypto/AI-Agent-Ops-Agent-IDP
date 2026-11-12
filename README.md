@@ -20,17 +20,40 @@ The UI at `/` is built for the HR person, not for developers:
 - **Today**: what needs you right now (drafts to approve, resumes to screen, times to confirm,
   missing feedback), a getting-started checklist, and each job's candidates by stage.
 - **Candidates**: a board with one column per hiring stage. Open a candidate for the AI's
-  reasons and the next step; tick 2 to 4 to compare them.
+  reasons and the next step; tick 2 to 4 to compare them. Screening runs as a background
+  job with "Screened n of N" progress, so a big batch never freezes the page.
+- **Jobs**: write the listing, set the location, publish it, and link to the public page.
 - **Review queue**: everything the AI wrote, waiting for approval. Nothing is sent automatically.
 - **AI activity**: what each assistant is allowed to touch, and a log of every run.
+- **Team**: add interviewers, reset passwords, turn on two-factor, sign out every device.
+
+### Free public ATS
+
+`/careers` is a public, no-login hiring page for published jobs. Applicants upload a
+resume and it lands in the pipeline tagged "Applied on the careers page". Duplicate
+applications (same email or resume) are rejected, uploads are type/size checked, and
+applications are rate-limited per IP (`PUBLIC_APPLY_PER_HOUR`). Publish or hide a job
+with the checkbox in **Jobs**; salary bands are never shown publicly.
 
 Colour carries meaning: violet = written or suggested by AI, amber = waiting on you,
 green = done. Icons are [Lucide](https://lucide.dev) (ISC licence), vendored in `app/static/vendor/`.
 
 ## Security model
 
-- **Authentication:** email + password (PBKDF2 hashes) → a JWT bearer token. Roles are
-  read from the database on every request, so deactivating a user locks them out at once.
+- **Authentication:** email + password (PBKDF2, 200k iterations) → a 15-minute JWT access
+  token plus a rotating refresh token in an httpOnly cookie. Access tokens are silently
+  renewed, and every token carries the user's `token_version`, so deactivating a user,
+  changing their password or "sign out everywhere" revokes them instantly.
+- **Password reset:** self-service link (single use, 30 minutes) and an HR-issued link;
+  a reset also signs out every existing session. Forgot-password gives the same answer
+  whether or not the email exists.
+- **Two-factor:** TOTP (any authenticator app) with one-time recovery codes; enabling or
+  disabling needs the password (and a current code).
+- **Rate limiting / lockout:** an account locks after `LOGIN_MAX_ATTEMPTS` wrong passwords;
+  login and forgot-password are also limited per IP.
+- **SSO:** optional OIDC (Google Workspace, Entra ID, Keycloak, Auth0). Set `OIDC_ISSUER`,
+  `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` to show the SSO button; SAML can be brokered by
+  the identity provider into OIDC.
 - **Roles:** `hr_admin` (everything) and `interviewer` (only interviews assigned to them,
   submitting their own feedback, no agent scores).
 - **Agent authorization:** an agent never gets the database. It gets an `AgentContext`
@@ -46,6 +69,9 @@ green = done. Icons are [Lucide](https://lucide.dev) (ISC licence), vendored in 
 
 - Every agent run writes an **AgentRun** audit row (who, which agent, which scopes it used,
   success/denied/error, duration). It's visible in the UI under *Agent activity*.
+- Structured JSON logs with a request id per call (`LOG_JSON=true` in production), including
+  login outcomes, LLM model/latency/token counts, job progress and failures. `/health` also
+  runs a real one-shot LLM check and reports `llm.configured`, the model list and latency.
 - With `AGENTOPS_API_KEY` set, each run is also an **AgentOps** trace, and the LLM calls
   inside it are captured automatically.
 
@@ -63,22 +89,32 @@ uvicorn app.main:app --reload --env-file .env
 Open http://localhost:8000, sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, create a job,
 and upload the files in `sample_data/`. API docs are at http://localhost:8000/docs.
 
-Free OpenRouter models are slow (one resume took ~40 s on `google/gemma-4-31b-it:free`),
-so the UI screens 2 resumes per request and shows "Screened n of N" progress.
+There is **no offline fake model in the app**: without `OPENROUTER_API_KEY` the AI actions
+say the AI is unavailable instead of making up an answer. Tests inject a deterministic stub
+(`tests/stub_llm.py`) through FastAPI dependency overrides, so CI needs no key and no network.
 
-Without `OPENROUTER_API_KEY`, the app uses **FakeLLM**: offline, free, deterministic
-(screening scores by keyword overlap). Tests and CI always use it.
+Free OpenRouter models are slow and rate-limited. Screening runs in a background job and
+falls through the model list on timeout, 429 or a non-JSON answer, reporting progress such
+as "Screened 12 of 20"; a candidate that still fails stays in **New** so you can retry.
 
 ## Environment variables
 
 | Name | Needed | Notes |
 |---|---|---|
-| `JWT_SECRET` | yes in production | 32+ random characters |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | first start | Creates the first HR admin if no users exist |
-| `OPENROUTER_API_KEY` | for real AI | Without it the FakeLLM is used |
+| `JWT_SECRET` | yes | 32+ random characters. The app refuses to start without it or with a placeholder |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | first start | Creates the first HR admin if no users exist |
+| `DATABASE_URL` | no | Defaults to SQLite at `./data/hr.db`; use the Postgres URL in production |
+| `APP_ENV` | no | `production` turns on secure cookies and strict defaults |
+| `OPENROUTER_API_KEY` | for real AI | AI actions are disabled and say so when it is missing |
 | `OPENROUTER_MODELS` | no | Comma-separated: main model first, then fallbacks. Use `:free` models |
+| `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES`, `LLM_MAX_TOKENS`, `LLM_CONCURRENCY` | no | Tuning for slow free models |
+| `JWT_EXPIRY_MINUTES`, `REFRESH_TOKEN_DAYS`, `MFA_TOKEN_MINUTES`, `PASSWORD_RESET_MINUTES` | no | Token lifetimes |
+| `LOGIN_MAX_ATTEMPTS`, `LOGIN_WINDOW_MINUTES`, `LOCKOUT_MINUTES` | no | Account lockout |
+| `PUBLIC_APPLY_PER_HOUR` | no | Per-IP cap on careers-page applications |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | no | Enables the SSO button; also `OIDC_REDIRECT_URI`, `OIDC_AUTO_PROVISION`, `OIDC_DEFAULT_ROLE` |
+| `RUN_WORKER` | no | `true` (default) runs the background agent-job thread in this process |
+| `LOG_JSON`, `LOG_LEVEL` | no | Structured logs for production |
 | `AGENTOPS_API_KEY` | no | Turns on AgentOps tracing |
-| `DATABASE_URL` | no | Defaults to SQLite at `./data/hr.db` |
 | `PORT` | Render | Render sets this; the container listens on it |
 
 ## Deploying (the code-along pipeline, on Render)
@@ -99,7 +135,8 @@ Branch → Pull request → CI (test) + 1 approval → Merge to main → Deploy 
 
 1. Render dashboard → **New → Blueprint** → pick this repo. `render.yaml` creates the
    `hiring-desk` web service (Docker, free plan, health check `/health`,
-   **auto-deploy off**) and asks for the secret values.
+   **auto-deploy off**) and a free Postgres database, wiring `DATABASE_URL` into the
+   service. It asks for the secret values once.
 2. Service → **Settings → Deploy Hook**: copy it into `.env` as `RENDER_DEPLOY_HOOK_URL`.
    Copy the service URL into `.env` as `APP_URL` (with `https://`, no trailing slash).
 3. `bash scripts/push-github-settings.sh spike-crypto/AI-Agent-Ops-Agent-IDP`
@@ -107,6 +144,11 @@ Branch → Pull request → CI (test) + 1 approval → Merge to main → Deploy 
 
 Keep auto-deploy **off**: if Render also deploys on push, every merge deploys twice.
 
-> **Prototype limits:** SQLite inside the container is wiped on every redeploy, and the free
-> instance sleeps after ~15 idle minutes (first request takes ~1 minute). Use fake resumes
-> only: free OpenRouter models may log prompts. Add Render Postgres before using real data.
+> **Prototype limits:** the free instance sleeps after ~15 idle minutes (the first request
+> takes about a minute), free Postgres expires after 30 days, and the in-process worker means
+> one worker process; run more only after replacing the job queue's poller with a shared
+> queue. Use fake resumes only: free OpenRouter models may log prompts.
+
+Schema changes are applied by Alembic at startup (`run_migrations()`), so an existing
+database is upgraded in place instead of being reset. New columns need a migration in
+`alembic/versions/`; `alembic.ini`/`alembic/env.py` take the URL from `DATABASE_URL`.

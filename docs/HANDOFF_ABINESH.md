@@ -52,10 +52,11 @@ on every deploy.
 - **Auth:** email + password (PBKDF2) → JWT bearer token. Roles: `hr_admin`, `interviewer`.
   `app/deps.py` has `get_current_user`, `require_hr`, `require_role(...)`.
 - The 6 agents, the scoped `AgentContext`, the runner, the AgentRun audit log, AgentOps.
-- LLM via **OpenRouter** free models (`app/llm.py`), with a `FakeLLM` that works offline.
-  **Tests and CI always use FakeLLM.** Never call a real API from tests.
-- 40 pytest tests (`tests/`, including 9 in `test_board_fixes.py` and 6 in
-  `test_interview_kit.py`), Dockerfile, `render.yaml`.
+- LLM via **OpenRouter** free models (`app/llm.py`). There is no fake model in `app/`.
+  Tests inject a stub through FastAPI dependency overrides (`tests/stub_llm.py`).
+  **Never call a real API from tests.**
+- 100 pytest tests (`tests/`, including `test_auth_hardening.py`, `test_job_queue.py`,
+  `test_public_ats.py`, `test_migrations.py`, `test_llm.py`), Dockerfile, `render.yaml`.
 - CI/CD per the code-along PDF: `ci.yml` (job `test`: pytest + docker build on every PR) and
   `deploy.yml` (on push to main: test → Render deploy hook with the commit SHA → smoke test
   that waits for `/health` to report that commit).
@@ -69,7 +70,7 @@ app/
   config.py            all settings from env vars
   models.py            tables: User, Job, Candidate, Interview, Feedback, Draft, AgentRun
   security.py, deps.py login, JWT, role checks
-  llm.py               OpenRouterLLM + FakeLLM + parse_json
+  llm.py               OpenRouterLLM + parse_json (no fake mode in the app)
   observability.py     AgentOps (optional, never crashes the app)
   agents/
     base.py            SCOPES, ROLE_SCOPES, AgentContext (the only data access agents get), Agent base class
@@ -147,15 +148,16 @@ Before an interview, the interviewer gets a tailored set of questions for that c
    `git checkout -b feature/abinesh-<feature>` → commit → push → open a PR → Bala approves.
 2. **Every feature has tests.** Run `python -m pytest -v` from the repo root before pushing.
    It must be green.
-3. **Tests never call a real LLM or AgentOps.** `tests/conftest.py` forces `LLM_PROVIDER=fake`.
-   If your feature parses LLM output, make `FakeLLM` return something sensible for it.
+3. **Tests never call a real LLM or AgentOps.** `tests/conftest.py` overrides the LLM
+   dependency with `tests/stub_llm.py`; if your feature parses LLM output, extend the stub.
 4. **Agents only go through `AgentContext`.** No `SessionLocal`, no `ctx._db` in agent code.
    New data access = a new context method that calls `self.require("<scope>")` first.
 5. **Agents only draft.** No sending email, no changing a candidate's final decision status.
 6. **No secrets in the repo.** Keys live in `.env` (git-ignored) locally and in Render's
    environment in production. Never commit `.env`. Don't paste keys into PR descriptions.
 7. **Keep the job named `test`** in `ci.yml`. Branch protection depends on that name.
-8. Don't add a database server, background workers or a second container. It's one container.
+8. Still one web container. Data lives in managed Postgres and the agent job worker runs
+   in-process; don't add a second container or a separate queue without discussing it.
 9. Keep using the fake resumes in `sample_data/`, never real people's resumes.
 10. **UI rules:** no emoji anywhere. Icons only from Lucide (`icon("name")`, names at
     lucide.dev/icons). Anything an AI wrote or suggested is violet (`btn ai`, `tag ai`, `ai-note`);
@@ -171,7 +173,7 @@ cd AI-Agent-Ops-Agent-IDP
 python -m venv .venv
 .venv\Scripts\activate                 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements-dev.txt
-copy .env.example .env                 # ask Bala for the OpenRouter key, or leave it empty (FakeLLM)
+copy .env.example .env                 # ask Bala for the OpenRouter key (AI is disabled without one)
 python -m pytest -v
 uvicorn app.main:app --reload --env-file .env
 ```

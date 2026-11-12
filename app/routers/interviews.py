@@ -3,6 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -60,9 +61,14 @@ def confirm_slot(interview_id: int, body: ConfirmIn, db: Session = Depends(get_d
     interview = db.get(Interview, interview_id)
     if interview is None:
         raise HTTPException(404, "Interview not found")
+    if interview.status == "done":
+        raise HTTPException(409, "This interview is already finished")
     if body.slot not in interview.proposed_slots:
         raise HTTPException(400, "That slot was not one of the proposed slots")
-    interview.scheduled_at = datetime.fromisoformat(body.slot)
+    try:
+        interview.scheduled_at = datetime.fromisoformat(body.slot)
+    except ValueError:
+        raise HTTPException(400, "Slots must be ISO date-times, e.g. 2026-11-20T10:00")
     interview.status = "scheduled"
     db.commit()
     return {"id": interview.id, "status": interview.status, "scheduled_at": body.slot}
@@ -79,7 +85,13 @@ def submit_feedback(interview_id: int, body: FeedbackIn, db: Session = Depends(g
         raise HTTPException(400, "This interview has not been scheduled yet")
     if db.scalar(select(Feedback.id).where(Feedback.interview_id == interview_id)):
         raise HTTPException(409, "Feedback already submitted")
-    db.add(Feedback(interview_id=interview_id, interviewer_id=user.id, rating=body.rating, notes=body.notes))
+    db.add(Feedback(interview_id=interview_id, interviewer_id=user.id,
+                    rating=body.rating, notes=body.notes))
     interview.status = "done"
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two submissions at the same moment: the unique index is the real guard.
+        db.rollback()
+        raise HTTPException(409, "Feedback already submitted")
     return {"ok": True}

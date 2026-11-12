@@ -9,6 +9,8 @@ So the screening agent can never see salary bands (it doesn't declare job:salary
 even when the HR admin, who can see them, is the one running it.
 """
 
+from typing import Callable
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -37,13 +39,24 @@ class AgentPermissionError(Exception):
 
 
 class AgentContext:
-    def __init__(self, db: Session, user: User, llm: LLM, agent_name: str, granted: frozenset[str]):
+    def __init__(
+        self,
+        db: Session,
+        user: User,
+        llm: LLM,
+        agent_name: str,
+        granted: frozenset[str],
+        progress: Callable[[int, int], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ):
         self._db = db
         self.user = user
         self.llm = llm
         self.agent_name = agent_name
         self.granted = granted
         self.used: set[str] = set()
+        self._progress = progress
+        self._should_stop = should_stop
 
     def require(self, scope: str) -> None:
         if scope not in self.granted:
@@ -52,8 +65,20 @@ class AgentContext:
             )
         self.used.add(scope)
 
+    def report_progress(self, current: int, total: int) -> None:
+        if self._progress is not None:
+            self._progress(current, total)
+
+    def checkpoint(self) -> None:
+        """Make finished work durable. Long runs call this between items so a crash,
+        cancellation or error never throws away scores that were already computed."""
+        self._db.commit()
+
+    def stopped(self) -> bool:
+        return bool(self._should_stop and self._should_stop())
+
     # ---- reads -------------------------------------------------------------
-    def job(self, job_id: int) -> dict:
+    def job(self, job_id: int, include_salary: bool = False) -> dict:
         self.require("job:read")
         job = self._db.get(Job, job_id)
         if job is None:
@@ -65,8 +90,10 @@ class AgentContext:
             "requirements": job.requirements,
             "description": job.description,
         }
-        if "job:salary:read" in self.granted:  # only included when the agent is allowed
-            self.used.add("job:salary:read")
+        # Salary is only read when the action actually needs it (offer letters), so the
+        # audit trail says "read salary" only when it was true.
+        if include_salary and "job:salary:read" in self.granted:
+            self.require("job:salary:read")
             data["salary_band"] = job.salary_band
         return data
 
@@ -136,7 +163,9 @@ class AgentContext:
         self.require("candidate:write")
         cand.score = score
         cand.screening = screening
-        cand.status = "screened"
+        # Re-screening must not undo a human decision (shortlisted/rejected/offered).
+        if cand.status == "new":
+            cand.status = "screened"
 
     def save_feedback_summary(self, cand: Candidate, summary: str) -> None:
         self.require("candidate:write")
@@ -145,7 +174,8 @@ class AgentContext:
     def create_interview(self, cand: Candidate, interviewer: User, slots: list[str]) -> Interview:
         self.require("interview:write")
         interview = Interview(candidate_id=cand.id, interviewer_id=interviewer.id, proposed_slots=slots)
-        cand.status = "interviewing"
+        if cand.status not in ("offered", "rejected"):
+            cand.status = "interviewing"
         self._db.add(interview)
         self._db.flush()
         return interview
