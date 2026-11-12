@@ -39,6 +39,7 @@ const assistant = name => ASSISTANTS[name] || { label: name, icon: "sparkles", d
 const DRAFT_KIND = {
   job_description: "Job description", invite: "Interview invite", rejection: "Rejection email",
   offer: "Offer letter", reminder: "Feedback reminder", interview_kit: "Interview kit",
+  decision_memo: "Hiring decision memo",
 };
 const SCOPE_PLAIN = {
   "job:read": "Read jobs", "job:salary:read": "Read salary bands", "candidate:read": "Read candidates and resumes",
@@ -661,7 +662,13 @@ async function openCandidate(id) {
     new: [["screen", "ai", "sparkles", "Screen new resumes for this job"]],
     screened: [["shortlisted", "", "user-check", "Shortlist"], ["rejected", "danger", "user-x", "Not moving forward"]],
     shortlisted: [["schedule", "", "calendar-plus", "Schedule an interview"], ["rejected", "danger", "user-x", "Not moving forward"]],
-    interviewing: [["summarize", "ai", "sparkles", "Summarise feedback"], ["offer", "ai", "file-signature", "Draft offer letter"], ["schedule", "secondary", "calendar-plus", "Add another interview"], ["rejected", "danger", "user-x", "Not moving forward"]],
+    interviewing: [
+      ["synthesize", "ai", "scale", "Synthesize decision"],
+      ["summarize", "ai", "sparkles", "Summarise feedback"],
+      ["offer", "ai", "file-signature", "Draft offer letter"],
+      ["schedule", "secondary", "calendar-plus", "Add another interview"],
+      ["rejected", "danger", "user-x", "Not moving forward"],
+    ],
     offered: [["offer", "ai", "file-signature", "Draft offer letter again"], ["rejected", "danger", "user-x", "Not moving forward"]],
     rejected: [["rejection", "ai", "mail", "Draft rejection email"], ["screened", "secondary", "refresh-cw", "Move back to Screened"]],
   }[s] || [];
@@ -730,6 +737,12 @@ async function openCandidate(id) {
     if (a === "rejected") return act(b, () => setStage("rejected", `${c.name} marked as not moving forward. You can now draft a kind rejection email.`));
     if (a === "screen") return screenJob(c.job_id, b).then(() => refreshAfterDrawer(id));
     if (a === "summarize") return act(b, async () => { await api("/agents/feedback/summarize", { method: "POST", body: { candidate_id: id } }); toast("Feedback summarised"); await refreshAfterDrawer(id); }, { working: "Summarising", slow: true });
+    if (a === "synthesize") return act(b, async () => {
+      const r = await api("/agents/feedback/synthesize", { method: "POST", body: { candidate_id: id } });
+      toast(`${r.summary}. The decision memo is in the review queue.`);
+      closeDrawer();
+      go("review");
+    }, { working: "Synthesizing", slow: true });
     const writer = { offer: "offer", rejection: "rejection" }[a];
     if (writer) return act(b, async () => {
       await api(`/agents/writing/${writer}`, { method: "POST", body: { candidate_id: id } });

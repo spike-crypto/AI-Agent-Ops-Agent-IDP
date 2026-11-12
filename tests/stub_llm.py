@@ -32,6 +32,18 @@ class StubLLM:
             return self._screen(prompt)
         if json_mode and "health check" in system.lower():
             return json.dumps({"ok": True, "service": "hiring-desk"})
+        if "interview feedback details" in prompt.lower():
+            return (
+                "## Hiring Decision Recommendation Memo\n\n"
+                "### 1. Executive Summary & Consensus\n"
+                "Recommendation: **Strong Hire**. Interviewers agree on strong backend depth.\n\n"
+                "### 2. Key Strengths Demonstrated\n"
+                "- Clear async API and data-modelling experience.\n\n"
+                "### 3. Reservations, Gaps & Red Flags\n"
+                "- None recorded.\n\n"
+                "### 4. Suggested Next Steps\n"
+                "- Prepare an offer letter for review."
+            )
         if "interview kit" in prompt.lower() or "tailored interview questions" in prompt.lower():
             return (
                 "## Interview Kit\n\n"
