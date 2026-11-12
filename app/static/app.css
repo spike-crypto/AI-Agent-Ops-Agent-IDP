@@ -244,15 +244,18 @@ tr:last-child td { border-bottom: 0; }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
 .toolbar select { width: auto; min-width: 220px; }
 .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(168px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 8px; }
-.col { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-m); min-height: 220px; display: flex; flex-direction: column; }
+.col { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-m); min-height: 220px; display: flex; flex-direction: column; min-width: 0; }
 .col-head { padding: 12px 12px 8px; display: flex; align-items: center; gap: 8px; }
 .col-head .n { margin-left: auto; color: var(--ink-3); font-weight: 600; font-size: 13px; }
 .col-help { padding: 0 12px 10px; font-size: 12.5px; color: var(--ink-3); }
-.col-body { padding: 0 8px 8px; display: grid; gap: 8px; align-content: start; }
+/* minmax(0, 1fr) + min-width: 0 keep a long unbroken name from widening the card past its column */
+.col-body { padding: 0 8px 8px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; }
 .card {
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 10px 10px 12px;
-  display: grid; gap: 6px; cursor: pointer; text-align: left; width: 100%;
+  display: grid; gap: 6px; cursor: pointer; text-align: left; width: 100%; min-width: 0;
 }
+.card-sum { overflow-wrap: anywhere; }
+.drawer-head h2 { overflow-wrap: anywhere; }
 .card:hover { border-color: var(--ink-3); }
 .card.selected { border-color: var(--ai); box-shadow: inset 0 0 0 1px var(--ai); }
 .card-top { display: flex; align-items: center; gap: 8px; }

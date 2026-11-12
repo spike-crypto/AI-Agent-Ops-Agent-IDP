@@ -33,7 +33,7 @@ const ASSISTANTS = {
   scheduling: { label: "AI Scheduler", icon: "calendar-plus", does: "Sets up an interview with the times you offer and drafts the invite." },
   feedback: { label: "AI Follow-up", icon: "bell-ring", does: "Spots interviews with missing feedback, drafts reminders, and summarises feedback." },
   comparison: { label: "AI Comparer", icon: "scale", does: "Puts 2 to 4 candidates side by side. It can only read, never change anything." },
-  interview_kit: { label: "AI Interview Kit", icon: "puzzle", does: "Prepares tailored questions and an evaluation rubric for an interview." },
+  interview_kit: { label: "AI Interview Kit", icon: "clipboard-check", does: "Prepares tailored questions and an evaluation rubric for an interview." },
 };
 const assistant = name => ASSISTANTS[name] || { label: name, icon: "sparkles", does: "" };
 const DRAFT_KIND = {
@@ -401,11 +401,7 @@ async function viewCandidates() {
       render();
     } catch (err) { toast(err.message, { error: true }); }
   };
-  $("#screen").onclick = e => act(e.currentTarget, async () => {
-    const r = await api("/agents/screening/screen", { method: "POST", body: { job_id: job.id } });
-    toast(r.failed.length ? `${r.summary}. ${r.failed.length} could not be read by the AI; try again.` : `${r.summary}. Open a candidate to see why.`, { ms: 7000 });
-    render();
-  }, { working: "Screening", slow: true });
+  $("#screen").onclick = e => screenJob(job.id, e.currentTarget);
   $$(".card").forEach(el => (el.onclick = e => {
     if (e.target.closest("input")) return;
     openCandidate(+el.dataset.id);
@@ -419,12 +415,36 @@ async function viewCandidates() {
   renderSelectionBar();
 }
 
+/* Screens a job's new resumes a few at a time, showing "Screened 4 of 20" on the button.
+   Free AI models take ~40 s per resume, so one big request would hang for many minutes. */
+const SCREEN_BATCH = 2;
+async function screenJob(jobId, btn) {
+  const failedIds = [];
+  let done = 0, total = null;
+  await act(btn, async () => {
+    for (;;) {
+      const r = await api("/agents/screening/screen", { method: "POST",
+        body: { job_id: jobId, limit: SCREEN_BATCH, exclude_ids: failedIds } });
+      r.failed.forEach(f => failedIds.push(f.candidate_id));
+      done += r.processed;
+      if (total === null) total = r.processed + r.remaining;
+      if (btn.isConnected) { btn.innerHTML = `${icon("refresh-cw", "spin")} Screened ${done} of ${total}`; paintIcons(); }
+      if (!r.remaining || !r.processed) break;
+    }
+    const ok = done - failedIds.length;
+    toast(failedIds.length
+      ? `Screened ${ok} of ${total}. ${plural(failedIds.length, "resume", "resumes")} could not be read by the AI; try again later.`
+      : `Screened ${plural(ok, "resume", "resumes")}. Open a candidate to see why.`, { ms: 7000 });
+  }, { working: "Starting", slow: true });
+  render();
+}
+
 function card(c) {
   const sel = state.selected.has(c.id);
   return `<div class="card ${sel ? "selected" : ""}" data-id="${c.id}" role="button" tabindex="0" aria-label="Open ${esc(c.name)}">
     <div class="card-top">
       <input type="checkbox" data-pick="${c.id}" ${sel ? "checked" : ""} aria-label="Select ${esc(c.name)} to compare">
-      <span class="card-name">${esc(c.name)}</span>
+      <span class="card-name" title="${esc(c.name)}">${esc(c.name)}</span>
       <span class="score ${c.score == null ? "none" : ""}" title="${c.score == null ? "Not screened yet" : "AI Screener score out of 100"}">${c.score ?? "–"}</span>
     </div>
     ${c.screening?.summary ? `<div class="card-sum">${esc(c.screening.summary)}</div>` : ""}
@@ -517,7 +537,7 @@ async function openCandidate(id) {
           ${mine.length ? `<div class="stack" style="gap:8px">${mine.map(i => `<div class="info-note" style="display:grid;gap:6px">
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
               <div><b>${esc(i.interviewer.name)}</b>, ${i.scheduled_at ? esc(fmtWhen(i.scheduled_at)) : "time not confirmed yet"}</div>
-              <button class="btn ai sm" data-drkit="${i.id}">${icon("puzzle")} Interview kit</button>
+              <button class="btn ai sm" data-drkit="${i.id}">${icon("clipboard-check")} Interview kit</button>
             </div>
             <div>${i.feedback ? `Rated ${i.feedback.rating} out of 5: ${esc(i.feedback.notes)}` : i.scheduled_at && isPast(i.scheduled_at) ? `<span style="color:var(--wait)">Feedback missing</span>` : "No feedback yet"}</div></div>`).join("")}</div>`
           : `<p class="small muted">No interviews yet.</p>`}
@@ -541,7 +561,7 @@ async function openCandidate(id) {
     if (a === "schedule") { $("#schedform").classList.toggle("hidden"); return; }
     if (a === "shortlisted" || a === "screened") return act(b, () => setStage(a, `${c.name} moved to ${STAGE_LABEL[a]}`));
     if (a === "rejected") return act(b, () => setStage("rejected", `${c.name} marked as not moving forward. You can now draft a kind rejection email.`));
-    if (a === "screen") return act(b, async () => { const r = await api("/agents/screening/screen", { method: "POST", body: { job_id: c.job_id } }); toast(r.summary); await refreshAfterDrawer(id); }, { working: "Screening", slow: true });
+    if (a === "screen") return screenJob(c.job_id, b).then(() => refreshAfterDrawer(id));
     if (a === "summarize") return act(b, async () => { await api("/agents/feedback/summarize", { method: "POST", body: { candidate_id: id } }); toast("Feedback summarised"); await refreshAfterDrawer(id); }, { working: "Summarising", slow: true });
     const writer = { offer: "offer", rejection: "rejection" }[a];
     if (writer) return act(b, async () => {
@@ -592,7 +612,7 @@ async function viewInterviews() {
           <select id="slot-${i.id}" name="slot" style="min-width:0">${i.proposed_slots.map(sl => `<option value="${esc(sl)}">${esc(fmtWhen(sl))}</option>`).join("")}</select>
           <button class="btn sm">${icon("check")} Confirm</button></form>`}</td>
         <td><span class="tag ${cls}">${icon(ic)}${label}</span>${i.feedback ? `<div class="small muted" style="margin-top:4px">Rated ${i.feedback.rating} out of 5</div>` : ""}</td>
-        <td><button class="btn ai sm" data-kit="${i.id}" title="Prepare tailored interview questions and rubric">${icon("puzzle")} Interview kit</button></td></tr>`; }).join("")}
+        <td><button class="btn ai sm" data-kit="${i.id}" title="Prepare tailored interview questions and rubric">${icon("clipboard-check")} Interview kit</button></td></tr>`; }).join("")}
       </table></div>` : `<div class="empty">${icon("calendar-days")}<h3>No interviews yet</h3><p>Open a shortlisted candidate and choose "Schedule an interview".</p>
         <button class="btn secondary" id="tocands">${icon("users")} Go to candidates</button></div>`}</section>`;
   $("#tocands") && ($("#tocands").onclick = () => go("candidates"));
