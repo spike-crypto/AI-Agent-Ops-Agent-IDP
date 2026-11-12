@@ -99,10 +99,15 @@ Each action is a method on the agent class, listed in its `actions` tuple.
 Done: the interview kit agent is merged (PRs #5 and #6), live on Render, and issue #4 is closed.
 You also resolved the Part H merge conflict (`registry.py`, `index.html`) in PR #6. Good work.
 
-### Your next task: fix PR for the interview kit (do this first)
+### Your next tasks
 
-Branch: `git checkout main && git pull && git checkout -b feature/abinesh-kit-fixes`.
-Bala reviews it. Each item needs a test.
+1. **Review and approve PR #9** (Bala). It fixes items 1 to 3 below in your interview kit,
+   plus board bugs (card overflow, names from file names, duplicate uploads, batched screening).
+   Check the diff and the new tests in `tests/test_board_fixes.py`, then use **Approve**.
+2. **Review and approve PR #7** (these docs).
+3. **Fix your git email** (item 4 below) before your next commit.
+
+For reference, what was wrong in the interview kit (fixed by PR #9):
 
 1. **Bug: the kit is addressed to the candidate.** In `app/agents/interview_kit.py`,
    `recipient=cand.email` must become the **interviewer's** email. An interview kit contains
@@ -120,7 +125,7 @@ Bala reviews it. Each item needs a test.
    you. Run `git config user.email "202484788+Abinesh-Sundar@users.noreply.github.com"` (or your
    real GitHub email) in the repo before committing.
 
-Part I is already done (Bala, PR #8), so this fix PR is your last code-along task.
+Part I is already done (Bala, PR #8), so reviewing #9 and #7 is your last code-along task.
 
 ### What the interview-kit agent does (reference, already built)
 
