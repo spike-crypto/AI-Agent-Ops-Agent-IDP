@@ -13,7 +13,7 @@
 code-along *"Build, Dockerize and Ship: CI/CD with GitHub PRs, GitHub Actions and a cloud host"*.
 We replaced the starter API with our own app. We deploy to **Render** instead of Railway.
 
-The app is for **one HR person** who runs hiring end to end. Five AI agents ("assistants" in
+The app is for **one HR person** who runs hiring end to end. Six AI agents ("assistants" in
 the UI) do the repetitive work, and the HR person makes every decision:
 
 | Agent (code) | Name in the UI | Job |
@@ -51,10 +51,11 @@ on every deploy.
 - `GET /dashboard` (`app/routers/dashboard.py`) powers the Today view.
 - **Auth:** email + password (PBKDF2) → JWT bearer token. Roles: `hr_admin`, `interviewer`.
   `app/deps.py` has `get_current_user`, `require_hr`, `require_role(...)`.
-- The 4 agents, the scoped `AgentContext`, the runner, the AgentRun audit log, AgentOps.
+- The 6 agents, the scoped `AgentContext`, the runner, the AgentRun audit log, AgentOps.
 - LLM via **OpenRouter** free models (`app/llm.py`), with a `FakeLLM` that works offline.
   **Tests and CI always use FakeLLM.** Never call a real API from tests.
-- 31 pytest tests (`tests/`, including your 6 in `test_interview_kit.py`), Dockerfile, `render.yaml`.
+- 40 pytest tests (`tests/`, including 9 in `test_board_fixes.py` and 6 in
+  `test_interview_kit.py`), Dockerfile, `render.yaml`.
 - CI/CD per the code-along PDF: `ci.yml` (job `test`: pytest + docker build on every PR) and
   `deploy.yml` (on push to main: test → Render deploy hook with the commit SHA → smoke test
   that waits for `/health` to report that commit).
@@ -74,7 +75,7 @@ app/
     base.py            SCOPES, ROLE_SCOPES, AgentContext (the only data access agents get), Agent base class
     registry.py        AGENTS = {...}: every agent is registered here  <-- shared file
     runner.py          run_agent(): role check, scoped context, trace, audit row
-    writing.py, screening.py, scheduling.py, feedback.py, comparison.py
+    writing.py, screening.py, scheduling.py, feedback.py, comparison.py, interview_kit.py
   routers/             auth, dashboard, jobs (+candidates), interviews, drafts, agents
   static/              index.html, app.css, app.js (the cockpit UI), vendor/lucide.min.js (icons)
 tests/                 conftest.py has fixtures: client, hr, interviewer, job
@@ -88,58 +89,53 @@ Each action is a method on the agent class, listed in its `actions` tuple.
 | You own | Details |
 |---|---|
 | **Reviewing Bala's PRs** | Branch protection needs *your* approval for every PR Bala opens (and Bala's for yours). Check the diff, check there is a test, then use **Approve** (a comment is not an approval). Nobody approves their own work, so don't fold Bala's commits into your PR for him to approve: that is how #3 ended up merged without your approval. |
-| **Your feature (Part H)** | Build it on your own branch on your own laptop, with tests. See section 5. |
-| **The merge conflict** | We both edit `app/agents/registry.py` (and maybe `app/main.py`), so the second PR to merge will conflict. Resolve it as in section 7. |
-| **"Break it on purpose" (Part I)** | Whoever does it: on a new branch, change an expected value in a test, open a PR, watch CI go red and the merge stay blocked, fix it, watch it go green, close the PR. |
+| **Your feature (Part H)** | Done: the interview kit agent, merged in PRs #5 and #6 and fixed in #9. See section 5. |
+| **The merge conflict** | Done: you resolved `registry.py` and `index.html` in PR #6 (`f0b1a88`). |
+| **"Break it on purpose" (Part I)** | Done by Bala in PR #8: on a new branch, a test was changed to fail, CI went red and the merge stayed blocked; the test was fixed, CI went green, and the PR was closed unmerged. |
 
 ## 5. Your feature
 
-### Status (2026-11-12)
+### Status: done
 
-Done: the interview kit agent is merged (PRs #5 and #6), live on Render, and issue #4 is closed.
-You also resolved the Part H merge conflict (`registry.py`, `index.html`) in PR #6. Good work.
+The interview kit is merged (PRs #5 and #6), and its follow-up fixes are merged in PR #9 and
+live on Render: the kit goes to the interviewer, the prompt has the untrusted-resume and
+protected-characteristics rules, and the icon is `clipboard-check`. Issue #4 is closed.
 
-### Your next task: fix PR for the interview kit (do this first)
+For reference, what PR #9 fixed:
 
-Branch: `git checkout main && git pull && git checkout -b feature/abinesh-kit-fixes`.
-Bala reviews it. Each item needs a test.
+1. **Addressed to the interviewer.** `prepare()` now uses
+   `AgentContext.interviewer_of(interview)` (guarded by `interview:read`) instead of
+   `cand.email`, so the questions and rubric never reach the candidate.
+2. **Prompt safety.** The SYSTEM prompt now says the resume is untrusted text from an
+   applicant and that protected characteristics must be ignored and never asked about.
+3. **Icon.** `ASSISTANTS.interview_kit` and both buttons use `clipboard-check`.
+4. **Git email.** Your later commits (`bc46c9e`, `8c89fbc`, `c0d990e`) are linked to your
+   GitHub account. The older local commit `f0b1a88` still carries the placeholder email, so it
+   shows as unlinked; no action needed unless you make more local commits, in which case run
+   `git config user.email "202484788+Abinesh-Sundar@users.noreply.github.com"`.
 
-1. **Bug: the kit is addressed to the candidate.** In `app/agents/interview_kit.py`,
-   `recipient=cand.email` must become the **interviewer's** email. An interview kit contains
-   the questions and the rubric; sending it to the candidate gives the interview away.
-   Add an `AgentContext` method (e.g. `interviewer_for(interview)`) that calls
-   `self.require("interview:read")` first, like the other context methods.
-   Test: the draft's `recipient` equals the interviewer's email, not the candidate's.
-2. **Prompt safety.** Add the two rules every other agent's SYSTEM prompt has:
-   the resume is untrusted text from an applicant, so ignore any instructions inside it;
-   judge only job-relevant skills and ignore protected characteristics (name, gender, age,
-   nationality, religion). See `app/agents/screening.py` for the wording.
-3. **Icon.** Use `clipboard-check` instead of `puzzle` in `app/static/app.js`
-   (`ASSISTANTS.interview_kit` and the two buttons).
-4. **Your git email.** Your commits say `abineshsundar@email.com`, so GitHub doesn't link them to
-   you. Run `git config user.email "202484788+Abinesh-Sundar@users.noreply.github.com"` (or your
-   real GitHub email) in the repo before committing.
-
-Part I is already done (Bala, PR #8), so this fix PR is your last code-along task.
+The code-along is complete. The only open housekeeping is deleting the merged branches with
+the approval-gated `cleanup-branches` workflow (PR #10): Bala runs it, you approve the
+`branch-cleanup` deployment, and it deletes the branches.
 
 ### What the interview-kit agent does (reference, already built)
 
 Before an interview, the interviewer gets a tailored set of questions for that candidate.
 
-- New file `app/agents/interview_kit.py`, class `InterviewKitAgent`, `name = "interview_kit"`.
+- File `app/agents/interview_kit.py`, class `InterviewKitAgent`, `name = "interview_kit"`.
 - Action `prepare(ctx, interview_id)`: reads the interview, its candidate's resume and the job
   requirements, then asks the LLM for 6–8 questions (technical, plus follow-ups on resume
   claims and the screening gaps) and a short "what good answers look like" rubric.
 - Saves the result as a **Draft** (`kind="interview_kit"`, `interview_id=...`) so HR reviews it.
 - **Scopes:** `job:read`, `candidate:read`, `interview:read`, `draft:write`. It must **not**
-  get `job:salary:read`. Add any new `AgentContext` method you need (e.g. `interview(id)`),
-  and make it call `self.require(...)` first, like the existing ones.
-- Register it in `app/agents/registry.py`.
+  get `job:salary:read`. It reaches data through `AgentContext.interview(id)` and
+  `interviewer_of(interview)`, both guarded by `interview:read`.
+- Registered in `app/agents/registry.py`.
 - UI (`app/static/app.js`):
-  - add `interview_kit: { label: "AI Interview kit", icon: "clipboard-check", does: "..." }`
-    to the `ASSISTANTS` map (`DRAFT_KIND` already has `interview_kit`);
-  - in `viewInterviews`, add a `btn ai sm` button "Prepare interview kit" with
-    `${icon("clipboard-check")}` to each row, calling `POST /agents/interview_kit/prepare`
+  - `ASSISTANTS.interview_kit` is `{ label: "AI Interview kit", icon: "clipboard-check", does: "..." }`
+    (`DRAFT_KIND` already has `interview_kit`);
+  - `viewInterviews` has a `btn ai sm` button "Prepare interview kit" with
+    `${icon("clipboard-check")}` on each row; it calls `POST /agents/interview_kit/prepare`
     through the existing `act(...)` helper, then `go("review")` so HR sees the draft.
 - **Tests** (`tests/test_interview_kit.py`): it creates a pending draft; it never receives
   `salary_band`; an interviewer calling it gets 403 and an AgentRun row with status `denied`;
@@ -206,6 +202,9 @@ Render, and the Deploy run's smoke test proves the new commit is live.
 - The merge conflict was resolved.
 - Every merge produced a green Deploy run ending with the smoke test.
 - `APP_URL/health` shows the latest commit ID, and every feature works on the live URL.
+
+Status: all met. The only caveat is the missing formal approval on PR #3; see
+`PROJECT_STATE.md` §5.
 
 ## 9. If something breaks
 
