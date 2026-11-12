@@ -1,0 +1,73 @@
+name: Delete merged branches
+
+# Bala runs this, then Abinesh approves the deployment before anything is deleted.
+on:
+  workflow_dispatch:
+    inputs:
+      branches:
+        description: "Comma-separated branch names to delete (main is never allowed)"
+        required: true
+        default: "feature/abinesh-interview-kit,feature/bala-cockpit-ui,fix/candidate-board-bugs,setup/deploy"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    environment: branch-cleanup
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      BRANCHES: ${{ inputs.branches }}
+    steps:
+      - name: Check every branch is merged and unprotected
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra raw <<< "$BRANCHES"
+          names=()
+          for item in "${raw[@]}"; do
+            branch="$(echo "$item" | xargs)"
+            [ -z "$branch" ] && continue
+
+            if [ "$branch" = "main" ]; then
+              echo "::error::main is never deleted"
+              exit 1
+            fi
+
+            info=$(gh api "repos/$REPO/branches/$branch" 2>/dev/null) || {
+              echo "::error::branch '$branch' does not exist"
+              exit 1
+            }
+            if [ "$(echo "$info" | jq -r .protected)" = "true" ]; then
+              echo "::error::branch '$branch' is protected"
+              exit 1
+            fi
+
+            merged=$(gh pr list --repo "$REPO" --head "$branch" --state merged --json number --jq 'length')
+            if [ "$merged" -eq 0 ]; then
+              echo "::error::branch '$branch' has no merged pull request"
+              exit 1
+            fi
+
+            names+=("$branch")
+          done
+
+          if [ "${#names[@]}" -eq 0 ]; then
+            echo "::error::no branches given"
+            exit 1
+          fi
+
+          printf '%s\n' "${names[@]}" > "$RUNNER_TEMP/branches.txt"
+          echo "Checked and safe to delete:"
+          cat "$RUNNER_TEMP/branches.txt"
+
+      - name: Delete the branches
+        run: |
+          set -euo pipefail
+          while read -r branch; do
+            [ -z "$branch" ] && continue
+            gh api -X DELETE "repos/$REPO/git/refs/heads/$branch"
+            echo "Deleted $branch"
+          done < "$RUNNER_TEMP/branches.txt"
