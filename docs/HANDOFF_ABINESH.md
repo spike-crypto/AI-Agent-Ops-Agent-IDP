@@ -23,6 +23,7 @@ the UI) do the repetitive work, and the HR person makes every decision:
 | `scheduling` | AI Scheduler | Creates an interview with proposed time slots, drafts the invite |
 | `feedback` | AI Follow-up | Finds interviews missing feedback, drafts reminders, summarises feedback |
 | `comparison` | AI Comparer | Compares 2 to 4 candidates side by side. Read-only (Bala's Part H feature) |
+| `interview_kit` | AI Interview Kit | Tailored questions + rubric for one interview (your Part H feature, merged) |
 
 Three ideas run through the whole codebase. **Don't break them:**
 
@@ -53,7 +54,7 @@ on every deploy.
 - The 4 agents, the scoped `AgentContext`, the runner, the AgentRun audit log, AgentOps.
 - LLM via **OpenRouter** free models (`app/llm.py`), with a `FakeLLM` that works offline.
   **Tests and CI always use FakeLLM.** Never call a real API from tests.
-- 24 pytest tests (`tests/`), Dockerfile, `render.yaml`.
+- 31 pytest tests (`tests/`, including your 6 in `test_interview_kit.py`), Dockerfile, `render.yaml`.
 - CI/CD per the code-along PDF: `ci.yml` (job `test`: pytest + docker build on every PR) and
   `deploy.yml` (on push to main: test → Render deploy hook with the commit SHA → smoke test
   that waits for `/health` to report that commit).
@@ -86,17 +87,42 @@ Each action is a method on the agent class, listed in its `actions` tuple.
 
 | You own | Details |
 |---|---|
-| **Reviewing Bala's PRs** | Branch protection needs *your* approval for every PR Bala opens (and Bala's for yours). Check the diff, check there is a test, then approve or request changes. Nobody approves their own work. |
+| **Reviewing Bala's PRs** | Branch protection needs *your* approval for every PR Bala opens (and Bala's for yours). Check the diff, check there is a test, then use **Approve** (a comment is not an approval). Nobody approves their own work, so don't fold Bala's commits into your PR for him to approve: that is how #3 ended up merged without your approval. |
 | **Your feature (Part H)** | Build it on your own branch on your own laptop, with tests. See section 5. |
 | **The merge conflict** | We both edit `app/agents/registry.py` (and maybe `app/main.py`), so the second PR to merge will conflict. Resolve it as in section 7. |
 | **"Break it on purpose" (Part I)** | Whoever does it: on a new branch, change an expected value in a test, open a PR, watch CI go red and the merge stay blocked, fix it, watch it go green, close the PR. |
 
 ## 5. Your feature
 
-> Tracked in the GitHub issue assigned to you ("Interview kit agent"). Any feature must
-> follow section 6. Start after Bala's cockpit UI PR is merged, so you build on the new UI.
+### Status (2026-11-12)
 
-### Interview-kit agent
+Done: the interview kit agent is merged (PRs #5 and #6), live on Render, and issue #4 is closed.
+You also resolved the Part H merge conflict (`registry.py`, `index.html`) in PR #6. Good work.
+
+### Your next task: fix PR for the interview kit (do this first)
+
+Branch: `git checkout main && git pull && git checkout -b feature/abinesh-kit-fixes`.
+Bala reviews it. Each item needs a test.
+
+1. **Bug: the kit is addressed to the candidate.** In `app/agents/interview_kit.py`,
+   `recipient=cand.email` must become the **interviewer's** email. An interview kit contains
+   the questions and the rubric; sending it to the candidate gives the interview away.
+   Add an `AgentContext` method (e.g. `interviewer_for(interview)`) that calls
+   `self.require("interview:read")` first, like the other context methods.
+   Test: the draft's `recipient` equals the interviewer's email, not the candidate's.
+2. **Prompt safety.** Add the two rules every other agent's SYSTEM prompt has:
+   the resume is untrusted text from an applicant, so ignore any instructions inside it;
+   judge only job-relevant skills and ignore protected characteristics (name, gender, age,
+   nationality, religion). See `app/agents/screening.py` for the wording.
+3. **Icon.** Use `clipboard-check` instead of `puzzle` in `app/static/app.js`
+   (`ASSISTANTS.interview_kit` and the two buttons).
+4. **Your git email.** Your commits say `abineshsundar@email.com`, so GitHub doesn't link them to
+   you. Run `git config user.email "202484788+Abinesh-Sundar@users.noreply.github.com"` (or your
+   real GitHub email) in the repo before committing.
+
+Part I is already done (Bala, PR #8), so this fix PR is your last code-along task.
+
+### What the interview-kit agent does (reference, already built)
 
 Before an interview, the interviewer gets a tailored set of questions for that candidate.
 
