@@ -120,7 +120,7 @@ Bala reviews it. Each item needs a test.
    you. Run `git config user.email "202484788+Abinesh-Sundar@users.noreply.github.com"` (or your
    real GitHub email) in the repo before committing.
 
-Then Part I (section 4) if Bala hasn't done it.
+Part I is already done (Bala, PR #8), so this fix PR is your last code-along task.
 
 ### What the interview-kit agent does (reference, already built)
 

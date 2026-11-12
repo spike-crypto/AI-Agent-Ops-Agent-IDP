@@ -91,7 +91,7 @@
 | F hosting (Render) | Done |
 | G deploy workflow via PR #2 | Done, approved by Abinesh, Deploy green incl. smoke test |
 | H one feature each + merge conflict | **Done, with one caveat** (see below) |
-| I break a test on purpose | **Not started** |
+| I break a test on purpose | **Done** (PR #8, Bala): CI red on `assert 'ok' == 'broken'`, merge refused; fixed, green, PR closed unmerged |
 
 PR history for Part H:
 
@@ -157,13 +157,10 @@ merged through PRs, conflict resolved (by Abinesh), every merge produced a green
 
 1. **Abinesh:** fix bugs 1 to 3 above on `feature/abinesh-kit-fixes`, with tests; open a PR.
    **Bala** reviews and approves; merge; confirm the Deploy run is green.
-2. **Part I (Bala suggested, so each person has done one review-gated merge):** on a new branch,
-   change an expected value in a test, open a PR, watch CI go red and the merge stay blocked,
-   fix it, watch it go green, then close the PR without merging.
-3. Optional, to make the review record clean: Abinesh adds an approving review comment to the
+2. Optional, to make the review record clean: Abinesh adds an approving review comment to the
    merged PR #3 (GitHub still allows reviews on merged PRs).
-4. Housekeeping: delete merged branches `setup/deploy`, `feature/bala-cockpit-ui`,
-   `feature/abinesh-interview-kit` (GitHub "Delete branch" button); add `AGENTOPS_API_KEY` in
+3. Housekeeping: delete merged branches `setup/deploy`, `feature/bala-cockpit-ui`,
+   `feature/abinesh-interview-kit`, `test/break-it-on-purpose` (GitHub "Delete branch" button); add `AGENTOPS_API_KEY` in
    Render and verify traces; consider Render Postgres before any real data.
 
 ## 10. How to verify quickly
