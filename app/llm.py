@@ -105,6 +105,21 @@ class FakeLLM:
                 "- High Hire (4-5): Demonstrates deep architectural reasoning, mentions security/performance trade-offs, communicates clearly.\n"
                 "- Mixed/Low Hire (1-2): Vague answers, cannot explain architecture decisions, lacks concrete examples."
             )
+        if "interview feedback details" in prompt.lower() or "hiring decision recommendation" in prompt.lower():
+            return (
+                "## Hiring Decision Recommendation Memo\n\n"
+                "### 1. Executive Summary & Consensus\n"
+                "Recommendation: **Strong Hire**\n"
+                "The interviewers unanimously recognized the candidate's deep backend and API systems design proficiency.\n\n"
+                "### 2. Key Strengths Demonstrated\n"
+                "- Strong architectural understanding of FastAPI, asynchronous programming, and clean modular code.\n"
+                "- Demonstrated practical experience containerizing services and working with PostgreSQL schemas.\n\n"
+                "### 3. Reservations & Focus Areas\n"
+                "- Minor observation on unfamiliarity with legacy cloud orchestration, though quick to adapt to Docker-based flows.\n\n"
+                "### 4. Suggested Next Steps\n"
+                "- Proceed to drafting an offer letter in the Review Queue.\n"
+                "- Clarify target start date and compensation expectations."
+            )
         first_line = prompt.strip().splitlines()[0] if prompt.strip() else ""
         return f"[Draft generated offline by FakeLLM]\n\n{first_line}\n\nPlease edit before sending."
 
