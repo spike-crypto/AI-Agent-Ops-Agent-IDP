@@ -164,6 +164,11 @@ Before an interview, the interviewer gets a tailored set of questions for that c
     amber means "waiting on you"; green means done. Copy is plain, sentence case, written for an
     HR person, not a developer ("Prepare interview kit", not "Run interview_kit.prepare").
 11. Commits: no AI-tool attribution lines (no "Co-Authored-By: Claude" or similar).
+13. **Agents delegate through tokens.** If your agent is called by the Copilot it receives a
+    single-use token (`app/identity.py`) and only that token's scopes. Never add write scopes to
+    the Copilot's own `scopes`; it carries them in `delegable_scopes` only to hand on. A new Copilot
+    capability is a new entry in `app/copilot_tools.py` (read, delegate or propose); anything that
+    changes the hiring record must be a `propose_` tool.
 12. **Prompts are versioned.** Define a system prompt as `Prompt("agent.purpose", 1, "...")`
     (see `app/prompts.py`). If you change a prompt's text, bump its version, run
     `python -m app.prompts --write-lock`, and commit `prompts.lock.json`. If you change the
