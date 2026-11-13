@@ -5,3 +5,5 @@ __pycache__/
 data/
 app/version.txt
 .superpowers/
+.env.*
+!.env.example

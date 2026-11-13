@@ -1077,7 +1077,7 @@ render();
    A right-side panel on every HR page. A message starts a background job; we poll it and
    show each step as it finishes. Changes come back as an action card that waits for
    Approve. Lives outside #app so moving between pages keeps the chat open. */
-const cp = { convId: null, polling: null, convs: [] };
+const cp = { convId: null, polling: null, convs: [], finished: new Set() };  // finished: job ids that ended
 const CP_EXAMPLES = [
   "Analyse the top 5 candidates for each open job",
   "Screen the new resumes and tell me who stands out",
@@ -1153,7 +1153,12 @@ async function copilotShow() {
   copilotWire(body);
   body.scrollTop = body.scrollHeight;
   const last = conv.messages[conv.messages.length - 1];
-  if (last && last.role === "user" && last.job_id) copilotPoll(last.job_id);
+  if (last && last.role === "user" && last.job_id) {
+    if (!cp.finished.has(last.job_id)) copilotPoll(last.job_id);
+    else body.insertAdjacentHTML("beforeend", `<div class="cp-msg assistant"><div class="ai-note">${icon("circle-alert")}
+      <div>Copilot stopped without an answer. Nothing was changed. Ask again.</div></div></div>`);
+    paintIcons();
+  }
 }
 
 function copilotLinked(text, steps) {
@@ -1246,7 +1251,10 @@ function copilotPoll(jobId, refreshAfter = false) {
       cp.polling = setTimeout(tick, 2000);
       return;
     }
-    if (job && job.status === "error") toast(`Copilot stopped: ${job.error}`, { error: true, ms: 8000 });
+    // Finished (or unreadable): never poll this job again, even if it left no reply.
+    cp.finished.add(jobId);
+    if (!job) toast("Could not check on Copilot. Reopen the chat to see the result.", { error: true, ms: 8000 });
+    else if (job.status === "error") toast(`Copilot stopped: ${job.error}`, { error: true, ms: 8000 });
     await copilotShow();
     if (refreshAfter && $("#main")) render();   // approved changes may move candidates on the page behind
   };

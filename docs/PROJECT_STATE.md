@@ -25,6 +25,9 @@
 | Repo (public) | https://github.com/spike-crypto/AI-Agent-Ops-Agent-IDP |
 | Live app | https://hiring-desk-30s9.onrender.com (`/health`, `/docs`) |
 | Render service | `srv-dbq6ogd6e07s73bd20q0`, created by Abinesh's Render account from `render.yaml` |
+| Production database | Supabase Postgres (`aws-0-ap-southeast-2.pooler.supabase.com`), set as Render `DATABASE_URL` on 2026-11-13. The earlier Render Postgres (`dpg-dbqoa0tbedkc73e8oaf0-a`) expired and made three deploys crash at startup. Local `.env` deliberately stays on SQLite |
+| Render API | `RENDER_API_KEY` in local `.env` (git-ignored): deploy status and logs via `api.render.com/v1/services/<id>/deploys` and `/v1/logs` |
+| Production test users | 1 HR admin + 2 interviewers (made-up), logins in git-ignored `.env.prod-test-users` |
 | Local project | `D:\Projects\Agent IDP` (Windows 11, PowerShell + Git Bash) |
 
 ## 3. Architecture (one container plus Postgres)
