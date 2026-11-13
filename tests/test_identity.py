@@ -32,10 +32,10 @@ def test_exchange_narrows_scopes_and_nests_actors():
     with SessionLocal() as db:
         hr = _user(db)
         copilot = identity.issue_for_user(
-            db, hr, "comparison", {"job:read", "candidate:read", "draft:write"}, {"turn": 7})
+            db, hr, "copilot", {"job:read", "candidate:read", "draft:write"}, {"turn": 7})
         step = identity.exchange(db, copilot, "screening", {"job:read", "candidate:read", "job:salary:read"})
         grant = identity.verify(db, step, identity.agent_id("screening"))
-    assert grant.actors == ("agent:screening", "agent:comparison")
+    assert grant.actors == ("agent:screening", "agent:copilot")
     assert grant.scopes == frozenset({"job:read", "candidate:read"})   # no salary: neither agent may
     assert grant.context == {"turn": 7}
     assert grant.user_id == hr.id
@@ -103,12 +103,12 @@ def test_run_agent_with_delegation_records_actor_chain(client, hr, job):
     with SessionLocal() as db:
         user = _user(db)
         parent = identity.issue_for_user(
-            db, user, "feedback", {"job:read", "candidate:read", "candidate:write"}, {})
+            db, user, "copilot", {"job:read", "candidate:read", "candidate:write"}, {})
         step = identity.exchange(db, parent, "screening", {"job:read", "candidate:read", "candidate:write"})
         run_agent(db, user, StubLLM(), "screening", "screen", {"job_id": job["id"]}, delegation=step)
         ok = db.query(AgentRun).order_by(AgentRun.id.desc()).first()
         assert ok.status == "success"
-        assert ok.delegation["actors"] == ["agent:screening", "agent:feedback"]
+        assert ok.delegation["actors"] == ["agent:screening", "agent:copilot"]
         assert ok.delegation["jti"] and "candidate:write" in ok.scopes_used
 
         with pytest.raises(identity.TokenError):           # same token again: replay

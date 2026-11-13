@@ -10,7 +10,7 @@ each line through a token. Tools and scopes live in app/copilot_tools.py.
 import json
 import time
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app import identity, observability
 from app.agents.base import Agent, AgentContext
@@ -179,20 +179,33 @@ class CopilotAgent(Agent):
         proposal = db.get(ActionProposal, int(proposal_id))
         if proposal is None or proposal.user_id != ctx.user.id:
             raise LookupError("Proposal not found")
-        if proposal.status != "approved":
-            raise ValueError(f"Proposal is {proposal.status}, not approved")
+        # Claim it atomically: with several workers only one job may apply a card.
+        claimed = db.execute(update(ActionProposal)
+                             .where(ActionProposal.id == proposal.id, ActionProposal.status == "approved")
+                             .values(status="applying"))
+        db.commit()
+        if claimed.rowcount != 1:
+            db.refresh(proposal)
+            raise ValueError(f"Proposal is {proposal.status}, not waiting to be applied")
         # Authority for these changes is HR's approval click, so the token comes from the
         # approving user now, not from the turn that prepared them.
         token = identity.issue_for_user(db, ctx.user, "copilot", COPILOT_SCOPES,
                                         {"conversation": proposal.conversation_id, "proposal": proposal.id})
         results = []
         for n, item in enumerate(proposal.items, start=1):
-            result = apply_item(db, ctx.user, ctx.llm, token, item,
-                                session_id=f"copilot-{proposal.conversation_id}")
+            try:
+                result = apply_item(db, ctx.user, ctx.llm, token, item,
+                                    session_id=f"copilot-{proposal.conversation_id}")
+                ok, summary, grant = result.ok, result.summary, result.grant
+            except Exception as exc:  # never leave a card half-applied without saying so
+                db.rollback()
+                ok, summary, grant = False, f"{item.get('label', item.get('tool'))} failed: {exc}", None
             step = {"n": n, "tool": item["tool"], "kind": "approved", "agent": item["agent"],
-                    "ok": result.ok, "summary": result.summary[:300], "grant": result.grant,
-                    "candidates": [], "duration_ms": 0}
+                    "ok": ok, "summary": summary[:300], "grant": grant, "candidates": [], "duration_ms": 0}
             results.append(step)
+            # Record each line as it finishes, so a crash still shows what was applied.
+            proposal.result = {**(proposal.result or {}), "steps": list(results)}
+            db.commit()
             ctx.report_step(step)
         failed = [r for r in results if not r["ok"]]
         proposal.status = "failed" if failed else "done"

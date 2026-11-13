@@ -11,6 +11,7 @@
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -29,7 +30,8 @@ STAGE_LABELS = {
     "interviewing": "Interviewing", "offered": "Offer sent", "rejected": "Not moving forward",
 }
 MAX_TOP = 25
-CHAT_SCREEN_LIMIT = 10
+# ~40 s per resume on free models, 3 at a time: 4 keeps one screening step well inside a turn.
+CHAT_SCREEN_LIMIT = 4
 
 
 @dataclass(frozen=True)
@@ -131,10 +133,11 @@ def _coerce(tool: Tool, args: dict) -> dict:
                 out[name] = int(value)
             elif kind == "str":
                 out[name] = str(value)[:200]
-            elif kind == "list[int]":
-                out[name] = [int(v) for v in value][:10]
-            elif kind == "list[str]":
-                out[name] = [str(v)[:40] for v in value][:5]
+            elif kind.startswith("list["):
+                if not isinstance(value, (list, tuple)):
+                    raise ToolInputError(f"'{name}' for {tool.name} must be a list")
+                out[name] = ([int(v) for v in value][:10] if kind == "list[int]"
+                             else [str(v)[:40] for v in value][:5])
         except (TypeError, ValueError):
             raise ToolInputError(f"'{name}' for {tool.name} must be {kind}") from None
     return out
@@ -309,7 +312,14 @@ def _propose(db: Session, tool: Tool, args: dict) -> ToolResult:
             raise LookupError(f"Interviewer {args['interviewer_id']} not found")
         if not args["slots"]:
             raise ToolInputError("Offer at least one interview time")
-        label = f"Propose an interview for {cand.name} with {interviewer.name} ({len(args['slots'])} time(s))"
+        when = []
+        for slot in args["slots"]:
+            try:
+                dt = datetime.fromisoformat(slot)
+            except ValueError:
+                raise ToolInputError(f"'{slot}' is not a date and time (use 2026-11-20T10:00)") from None
+            when.append(f"{dt.day} {dt:%b %Y, %H:%M}")
+        label = f"Propose an interview for {cand.name} with {interviewer.name} at " + " or ".join(when)
     item = {"tool": tool.name, "agent": tool.agent, "action": tool.action, "params": args, "label": label}
     return ToolResult(True, f"Prepared for HR approval: {label}", {"label": label}, proposal_item=item)
 
@@ -334,6 +344,10 @@ def run_tool(db: Session, user: User, llm: LLM, copilot_token: str, name: str, a
         db.rollback()
         log.info("copilot.tool_failed", extra={"tool": name, "error": str(exc)[:200]})
         return ToolResult(False, f"{name} failed: {exc}")
+    except Exception as exc:  # an agent crashed: report it as a failed step, never end the turn
+        db.rollback()
+        log.warning("copilot.tool_crashed", extra={"tool": name, "error": str(exc)[:200]})
+        return ToolResult(False, f"{name} failed unexpectedly: {exc}")
 
 
 def apply_item(db: Session, user: User, llm: LLM, copilot_token: str, item: dict,
@@ -345,6 +359,6 @@ def apply_item(db: Session, user: User, llm: LLM, copilot_token: str, item: dict
     try:
         clean = _coerce(tool, item.get("params") or {})
         return _delegate(db, user, llm, copilot_token, tool.agent, tool.action, tool.scopes, clean, session_id)
-    except (ToolInputError, LookupError, ValueError, AgentPermissionError, LLMError) as exc:
+    except Exception as exc:  # report every failure as a failed line; the card must still finish
         db.rollback()
         return ToolResult(False, f"{item.get('label', tool.name)} failed: {exc}")

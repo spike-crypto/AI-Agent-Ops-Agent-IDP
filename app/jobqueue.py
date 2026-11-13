@@ -102,6 +102,21 @@ def _finish(job_id: int, status: str, result: dict | None = None, error: str = "
         db.commit()
 
 
+def _turn_failed(job: AgentJob, error: str) -> None:
+    """A Copilot turn that died still answers, so the chat never waits for a reply that won't come."""
+    if job.agent != "copilot" or job.action != "turn":
+        return
+    conversation_id = (job.params or {}).get("conversation_id")
+    if conversation_id is None:
+        return
+    from app.models import Message
+
+    with SessionLocal() as db:
+        db.add(Message(conversation_id=int(conversation_id), role="assistant", job_id=job.id,
+                       content=f"Copilot stopped: {error[:300]}. Nothing was changed. Try again in a minute."))
+        db.commit()
+
+
 def run_job(job_id: int) -> None:
     with SessionLocal() as db:
         job = db.get(AgentJob, job_id)
@@ -110,11 +125,13 @@ def run_job(job_id: int) -> None:
         user = db.get(User, job.user_id)
         if user is None or not user.is_active:
             _finish(job_id, "error", error="The user who started this job is no longer active")
+            _turn_failed(job, "the account that asked is no longer active")
             return
         try:
             llm = get_llm()
         except LLMError as exc:
             _finish(job_id, "error", error=str(exc))
+            _turn_failed(job, str(exc))
             return
         started = time.perf_counter()
         try:
@@ -127,6 +144,7 @@ def run_job(job_id: int) -> None:
         except Exception as exc:
             db.rollback()
             _finish(job_id, "error", error=f"{type(exc).__name__}: {exc}")
+            _turn_failed(job, str(exc))
             log.warning("job.failed", extra={"job_id": job_id, "error": str(exc)[:300]})
             return
         if _is_cancelled(job_id):
