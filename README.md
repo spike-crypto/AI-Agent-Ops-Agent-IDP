@@ -11,6 +11,8 @@ or interviewer until they have approved it.
 | **scheduling** | Creates an interview with proposed slots and drafts the invite | job:read, candidate:read, interview:write, draft:write |
 | **feedback** | Finds interviews with missing feedback, drafts reminders, summarises feedback, and synthesises a hiring decision memo from the interviewers' notes | job:read, candidate:read, candidate:write, interview:read, feedback:read, draft:write |
 | **comparison** | Compares 2 to 4 candidates for one job side by side (read-only) | job:read, candidate:read |
+| **recruiter** | Moves a candidate to another stage, only for changes HR approved in Copilot | candidate:read, candidate:stage:write |
+| **copilot** | Answers HR in plain language by delegating each step (see below) | read-only for itself; hands on narrower tokens |
 | **interview_kit** | Prepares tailored interview questions and a rubric, addressed to the interviewer | job:read, candidate:read, interview:read, draft:write |
 
 ## The HR cockpit
@@ -79,6 +81,32 @@ green = done. Icons are [Lucide](https://lucide.dev) (ISC licence), vendored in 
   to send no prompt or answer text. Tracing can never break an agent run.
   Runs are grouped into Langfuse **sessions** by job opening (`job-3`), so one session shows
   every agent run for that role; each eval run is its own session.
+
+## HR Copilot
+
+**Ask Copilot** (sidebar) opens a chat on every HR page. HR asks in plain language
+(*"Analyse the top 5 candidates for AI Developer"*) and the Copilot works it out step by step:
+
+- **It delegates, it does not act.** The Copilot can only read for itself. Every other step is
+  handed to the agent that owns it: Screener, Comparer, Follow-up, Interview kit.
+- **Agents talk through identity (token exchange).** For each step the Copilot exchanges its
+  token for a new one that names the HR person (`sub`), the acting chain
+  (`agent:comparison` acting for `agent:copilot`), exactly one target agent (`aud`), only the
+  permissions that step needs, a 5-minute expiry and a single-use id. The target agent refuses
+  to run without it; reuse, expiry, wrong agent or a deactivated user are refused and logged.
+  Every token is recorded in `token_grants` (never the token itself). See `app/identity.py`.
+- **Changes wait for approval.** Stage changes, interviews and rejection or offer emails come
+  back as an action card. Nothing changes until HR clicks **Approve all**; then each line runs
+  through its own token (stage changes by the Recruiter agent, emails by the Writer).
+- **Background and visible.** Each request is a background job; the chat shows each step as it
+  finishes, with the agent, time taken and the permissions its token carried.
+- **Limits:** 6 tool calls, 8 model calls and 4 minutes per request; screening from chat is
+  capped at 10 resumes. Free models make a request take one to three minutes.
+- **Traced:** each conversation is one Langfuse session (`copilot-<id>`); approve/dismiss is a
+  `copilot_action` score. Planner prompt: `copilot.planner@v1`.
+- **Honest limit:** the agents share one process, so the token boundary is enforced by code,
+  not by the network. It buys least privilege per step, replay protection and a full
+  delegation audit trail today, and the same token format works if agents become services.
 
 ## AgentOps: prompts, evals and feedback
 

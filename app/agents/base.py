@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app import observability
 from app.llm import LLM
-from app.models import Candidate, Draft, Feedback, Interview, Job, User, utcnow
+from app.models import CANDIDATE_STATUSES, Candidate, Draft, Feedback, Interview, Job, User, utcnow
 
 SCOPES = {
     "job:read": "Read job title, department, requirements and description",
@@ -27,6 +27,8 @@ SCOPES = {
     "interview:write": "Create interviews and look up interviewers",
     "feedback:read": "Read interviewer feedback",
     "draft:write": "Create drafts for HR to review (never sends anything)",
+    "draft:read": "Read drafts waiting in the review queue",
+    "candidate:stage:write": "Move a candidate to another hiring stage (only after HR approves)",
 }
 
 ROLE_SCOPES: dict[str, frozenset[str]] = {
@@ -49,6 +51,7 @@ class AgentContext:
         granted: frozenset[str],
         progress: Callable[[int, int], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        on_step: Callable[[dict], None] | None = None,
     ):
         self._db = db
         self.user = user
@@ -58,6 +61,7 @@ class AgentContext:
         self.used: set[str] = set()
         self._progress = progress
         self._should_stop = should_stop
+        self._on_step = on_step
 
     def require(self, scope: str) -> None:
         if scope not in self.granted:
@@ -69,6 +73,22 @@ class AgentContext:
     def report_progress(self, current: int, total: int) -> None:
         if self._progress is not None:
             self._progress(current, total)
+
+    def report_step(self, step: dict) -> None:
+        """An orchestrator's finished step, for the chat's live timeline."""
+        if self._on_step is not None:
+            self._on_step(step)
+
+    def orchestrator_session(self) -> Session:
+        """The database session, for an orchestrator that delegates through tokens.
+        Ordinary agents must use the scoped methods below; only an agent that can hand on
+        scopes (the Copilot) gets direct access, and it only reads with it."""
+        from app.agents.registry import AGENTS
+
+        agent = AGENTS.get(self.agent_name)
+        if agent is None or not agent.delegable_scopes:
+            raise AgentPermissionError(f"Agent '{self.agent_name}' is not an orchestrator")
+        return self._db
 
     def checkpoint(self) -> None:
         """Make finished work durable. Long runs call this between items so a crash,
@@ -168,6 +188,15 @@ class AgentContext:
         if cand.status == "new":
             cand.status = "screened"
 
+    def set_stage(self, cand: Candidate, stage: str) -> str:
+        """Move a candidate to another hiring stage. Only the Recruiter agent holds this scope,
+        and the Copilot only reaches it after HR approves. Returns the previous stage."""
+        self.require("candidate:stage:write")
+        if stage not in CANDIDATE_STATUSES:
+            raise ValueError(f"Unknown stage '{stage}'. Use one of: {', '.join(CANDIDATE_STATUSES)}")
+        previous, cand.status = cand.status, stage
+        return previous
+
     def save_feedback_summary(self, cand: Candidate, summary: str) -> None:
         self.require("candidate:write")
         cand.feedback_summary = summary
@@ -199,6 +228,9 @@ class Agent:
     name: str = ""
     description: str = ""
     scopes: frozenset[str] = frozenset()
+    # Scopes the agent may carry on its token only to hand on to other agents (token exchange),
+    # never to use itself. Only an orchestrator such as the Copilot has any.
+    delegable_scopes: frozenset[str] = frozenset()
     allowed_roles: frozenset[str] = frozenset({"hr_admin"})
     actions: tuple[str, ...] = ()
 

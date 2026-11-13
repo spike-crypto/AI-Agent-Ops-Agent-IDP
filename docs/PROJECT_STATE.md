@@ -25,6 +25,9 @@
 | Repo (public) | https://github.com/spike-crypto/AI-Agent-Ops-Agent-IDP |
 | Live app | https://hiring-desk-30s9.onrender.com (`/health`, `/docs`) |
 | Render service | `srv-dbq6ogd6e07s73bd20q0`, created by Abinesh's Render account from `render.yaml` |
+| Production database | Supabase Postgres (`aws-0-ap-southeast-2.pooler.supabase.com`), set as Render `DATABASE_URL` on 2026-11-13. The earlier Render Postgres (`dpg-dbqoa0tbedkc73e8oaf0-a`) expired and made three deploys crash at startup. Local `.env` deliberately stays on SQLite |
+| Render API | `RENDER_API_KEY` in local `.env` (git-ignored): deploy status and logs via `api.render.com/v1/services/<id>/deploys` and `/v1/logs` |
+| Production test users | 1 HR admin + 2 interviewers (made-up), logins in git-ignored `.env.prod-test-users` |
 | Local project | `D:\Projects\Agent IDP` (Windows 11, PowerShell + Git Bash) |
 
 ## 3. Architecture (one container plus Postgres)
@@ -101,6 +104,21 @@
   plain sentence-case copy for HR people. Checked in Edge: light, dark, 390 px phone width.
 - **Health/version:** `/health` returns `version` from `app/version.txt` if present, else
   `RENDER_GIT_COMMIT`, else `dev`. The smoke test compares it with the merge commit.
+
+**HR Copilot (added 2026-11-13, spec `docs/superpowers/specs/2026-11-13-hr-copilot-design.md`):**
+- `app/identity.py`: delegated agent tokens (JWT, `typ agent+jwt`, HKDF key from `JWT_SECRET`,
+  300 s, single-use `jti`, `act` chain). `issue_for_user` (exchange 1), `exchange` (exchange 2),
+  `verify` (spends the token). `run_agent(..., delegation=token)` grants exactly the token's scopes;
+  `agent_runs.delegation` records jti/actors/scopes. `Agent.delegable_scopes` = scopes carried only to
+  hand on (Copilot); its own `scopes` are read-only.
+- `app/agents/recruiter.py`: only holder of `candidate:stage:write`.
+- `app/copilot_tools.py`: 6 read, 5 delegate, 4 propose tools. `app/agents/copilot.py`: plan-act
+  loop (`turn`) and `approve`. `app/routers/copilot.py`: conversations, messages (background job),
+  approve/dismiss (atomic). Migration `0004`: token_grants, conversations, messages,
+  action_proposals, agent_jobs.steps, agent_runs.delegation.
+- UI: "Ask Copilot" panel in `app/static/app.js` (`copilot*` functions).
+- Tests: `test_identity.py`, `test_recruiter.py`, `test_copilot_tools.py`, `test_copilot_agent.py`,
+  `test_copilot_api.py` (scripted planner `tests/stub_llm.ScriptedLLM`).
 
 **AgentOps practices (added 2026-11-13):**
 - **Prompt versioning:** `app/prompts.py`. Each system prompt is `Prompt(name, version, text)` (a

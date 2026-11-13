@@ -47,7 +47,7 @@ def job_out(job: AgentJob) -> dict:
     return {
         "id": job.id, "agent": job.agent, "action": job.action, "status": job.status,
         "progress_current": job.progress_current, "progress_total": job.progress_total,
-        "result": job.result, "error": job.error,
+        "result": job.result, "error": job.error, "steps": job.steps or [],
         "created_at": job.created_at.isoformat(timespec="seconds"),
         "started_at": job.started_at.isoformat(timespec="seconds") if job.started_at else None,
         "finished_at": job.finished_at.isoformat(timespec="seconds") if job.finished_at else None,
@@ -78,6 +78,15 @@ def _set_progress(job_id: int, done: int, total: int) -> None:
         db.commit()
 
 
+def _append_step(job_id: int, step: dict) -> None:
+    """One finished Copilot step, written straight away so the chat can show it live."""
+    with SessionLocal() as db:
+        job = db.get(AgentJob, job_id)
+        if job is not None:
+            job.steps = [*(job.steps or []), json.loads(json.dumps(step, default=str))]
+            db.commit()
+
+
 def _is_cancelled(job_id: int) -> bool:
     with SessionLocal() as db:
         return db.scalar(select(AgentJob.status).where(AgentJob.id == job_id)) == "cancelled"
@@ -93,6 +102,21 @@ def _finish(job_id: int, status: str, result: dict | None = None, error: str = "
         db.commit()
 
 
+def _turn_failed(job: AgentJob, error: str) -> None:
+    """A Copilot turn that died still answers, so the chat never waits for a reply that won't come."""
+    if job.agent != "copilot" or job.action != "turn":
+        return
+    conversation_id = (job.params or {}).get("conversation_id")
+    if conversation_id is None:
+        return
+    from app.models import Message
+
+    with SessionLocal() as db:
+        db.add(Message(conversation_id=int(conversation_id), role="assistant", job_id=job.id,
+                       content=f"Copilot stopped: {error[:300]}. Nothing was changed. Try again in a minute."))
+        db.commit()
+
+
 def run_job(job_id: int) -> None:
     with SessionLocal() as db:
         job = db.get(AgentJob, job_id)
@@ -101,11 +125,13 @@ def run_job(job_id: int) -> None:
         user = db.get(User, job.user_id)
         if user is None or not user.is_active:
             _finish(job_id, "error", error="The user who started this job is no longer active")
+            _turn_failed(job, "the account that asked is no longer active")
             return
         try:
             llm = get_llm()
         except LLMError as exc:
             _finish(job_id, "error", error=str(exc))
+            _turn_failed(job, str(exc))
             return
         started = time.perf_counter()
         try:
@@ -113,10 +139,12 @@ def run_job(job_id: int) -> None:
                 db, user, llm, job.agent, job.action, job.params or {},
                 progress=lambda done, total: _set_progress(job_id, done, total),
                 should_stop=lambda: _is_cancelled(job_id),
+                on_step=lambda step: _append_step(job_id, step),
             )
         except Exception as exc:
             db.rollback()
             _finish(job_id, "error", error=f"{type(exc).__name__}: {exc}")
+            _turn_failed(job, str(exc))
             log.warning("job.failed", extra={"job_id": job_id, "error": str(exc)[:300]})
             return
         if _is_cancelled(job_id):

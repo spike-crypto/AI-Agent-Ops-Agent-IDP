@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.agents.base import SCOPES, AgentPermissionError
@@ -70,13 +70,15 @@ def list_jobs(limit: int = Query(20, ge=1, le=100), db: Session = Depends(get_db
     q = select(AgentJob).order_by(AgentJob.id.desc()).limit(limit)
     if user.role != "hr_admin":
         q = q.where(AgentJob.user_id == user.id)
+    else:  # Copilot turns hold a person's chat: private to them, even from other HR admins
+        q = q.where(or_(AgentJob.agent != "copilot", AgentJob.user_id == user.id))
     return [job_out(j) for j in db.scalars(q)]
 
 
 @router.get("/agent-jobs/{job_id}")
 def get_job(job_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     job = db.get(AgentJob, job_id)
-    if job is None or (job.user_id != user.id and user.role != "hr_admin"):
+    if job is None or (job.user_id != user.id and (user.role != "hr_admin" or job.agent == "copilot")):
         raise HTTPException(404, "Job not found")
     return job_out(job)
 

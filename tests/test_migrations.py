@@ -41,7 +41,7 @@ def test_a_fresh_database_gets_the_full_schema(tmp_path, monkeypatch):
     eng = _point_at(monkeypatch, tmp_path)
     migrations.run_migrations()
 
-    assert _version(eng) == "0003"
+    assert _version(eng) == "0004"
     assert {"users", "jobs", "candidates", "interviews", "drafts", "feedback", "agent_runs",
             "refresh_tokens", "password_resets", "agent_jobs"} <= _tables(eng)
     assert {"token_version", "failed_logins", "locked_until", "last_login_at", "mfa_secret",
@@ -50,7 +50,7 @@ def test_a_fresh_database_gets_the_full_schema(tmp_path, monkeypatch):
     assert "source" in _columns(eng, "candidates")
 
     migrations.run_migrations()  # running twice is a no-op, not an error
-    assert _version(eng) == "0003"
+    assert _version(eng) == "0004"
 
 
 def test_a_pre_alembic_database_is_upgraded_with_its_data_intact(tmp_path, monkeypatch):
@@ -69,7 +69,7 @@ def test_a_pre_alembic_database_is_upgraded_with_its_data_intact(tmp_path, monke
 
     migrations.run_migrations()
 
-    assert _version(eng) == "0003"
+    assert _version(eng) == "0004"
     assert {"token_version", "mfa_enabled"} <= _columns(eng, "users")
     assert {"location", "published"} <= _columns(eng, "jobs")
     with eng.connect() as conn:
@@ -87,7 +87,7 @@ def test_a_current_schema_missing_its_version_row_is_stamped(tmp_path, monkeypat
 
     migrations.run_migrations()
 
-    assert _version(eng) == "0003"
+    assert _version(eng) == "0004"
     assert "agent_jobs" in _tables(eng)
 
 
@@ -101,5 +101,25 @@ def test_a_0002_schema_missing_its_version_row_still_gets_0003(tmp_path, monkeyp
 
     migrations.run_migrations()
 
-    assert _version(eng) == "0003"
+    assert _version(eng) == "0004"
     assert "trace_id" in _columns(eng, "drafts")
+
+
+def test_a_0003_schema_missing_its_version_row_still_gets_0004(tmp_path, monkeypatch):
+    eng = _point_at(monkeypatch, tmp_path)
+    command.upgrade(_cfg(), "0003")
+    with eng.begin() as conn:
+        conn.execute(text("drop table alembic_version"))
+
+    migrations.run_migrations()
+
+    assert _version(eng) == "0004"
+    assert {"token_grants", "conversations", "messages", "action_proposals"} <= _tables(eng)
+    assert "steps" in _columns(eng, "agent_jobs") and "delegation" in _columns(eng, "agent_runs")
+
+
+def test_0004_downgrades_cleanly(tmp_path, monkeypatch):
+    eng = _point_at(monkeypatch, tmp_path)
+    command.upgrade(_cfg(), "head")
+    command.downgrade(_cfg(), "0003")
+    assert "token_grants" not in _tables(eng) and "steps" not in _columns(eng, "agent_jobs")

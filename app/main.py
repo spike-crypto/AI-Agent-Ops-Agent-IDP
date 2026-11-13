@@ -162,7 +162,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 # --- Feature routers: add yours below this line ---
-from app.routers import agents, auth, dashboard, drafts, interviews, jobs, public  # noqa: E402
+from app.routers import copilot, agents, auth, dashboard, drafts, interviews, jobs, public  # noqa: E402
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
@@ -171,3 +171,4 @@ app.include_router(interviews.router)
 app.include_router(drafts.router)
 app.include_router(agents.router)
 app.include_router(public.router)
+app.include_router(copilot.router)

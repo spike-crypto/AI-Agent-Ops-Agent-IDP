@@ -4,3 +4,6 @@ __pycache__/
 .env
 data/
 app/version.txt
+.superpowers/
+.env.*
+!.env.example
