@@ -34,6 +34,8 @@ const ASSISTANTS = {
   feedback: { label: "AI Follow-up", icon: "bell-ring", does: "Spots interviews with missing feedback, drafts reminders, and summarises feedback." },
   comparison: { label: "AI Comparer", icon: "scale", does: "Puts 2 to 4 candidates side by side. It can only read, never change anything." },
   interview_kit: { label: "AI Interview Kit", icon: "clipboard-check", does: "Prepares tailored questions and an evaluation rubric for an interview." },
+  recruiter: { label: "AI Recruiter", icon: "user-check", does: "Moves a candidate to another stage, only after you approve it in Copilot." },
+  copilot: { label: "Copilot", icon: "message-square-text", does: "Answers your questions in plain language by handing each step to the right assistant." },
 };
 const assistant = name => ASSISTANTS[name] || { label: name, icon: "sparkles", does: "" };
 const DRAFT_KIND = {
@@ -45,6 +47,7 @@ const SCOPE_PLAIN = {
   "job:read": "Read jobs", "job:salary:read": "Read salary bands", "candidate:read": "Read candidates and resumes",
   "candidate:write": "Save scores and summaries", "interview:read": "Read interviews", "interview:write": "Create interviews",
   "feedback:read": "Read feedback", "draft:write": "Write drafts for you to review",
+  "draft:read": "Read the review queue", "candidate:stage:write": "Change a candidate's stage",
 };
 
 /* ---------- plumbing ---------- */
@@ -301,6 +304,7 @@ async function render() {
     <aside class="side" aria-label="Main">
       <div class="brand"><div class="brand-mark">${icon("briefcase")}</div>
         <div><div class="brand-name">Hiring Desk</div><div class="brand-sub">${hr ? "HR cockpit" : "Interviewer view"}</div></div></div>
+      ${hr ? `<button class="copilot-open" id="copilot-open">${icon("message-square-text")}<span>Ask Copilot</span></button>` : ""}
       <nav class="nav">${nav.map(item => item === null ? `<div class="nav-group">Oversight</div>` : `
         <button data-view="${item[0]}" ${state.view === item[0] ? 'aria-current="page"' : ""}>${icon(item[2])}<span>${item[1]}</span>
         ${count(item[0]) ? `<span class="count" title="Waiting on you">${count(item[0])}</span>` : ""}</button>`).join("")}</nav>
@@ -315,6 +319,7 @@ async function render() {
   <div id="layer"></div>`;
   $$(".nav button").forEach(b => (b.onclick = () => go(b.dataset.view)));
   $("#signout").onclick = signOut;
+  if (hr) $("#copilot-open").onclick = () => copilotOpen();
   const views = { today: viewToday, candidates: viewCandidates, jobs: viewJobs, interviews: viewInterviews, review: viewReview,
     activity: viewActivity, team: viewTeam, help: viewHelp, mine: viewMine };
   try { await (views[state.view] || viewToday)(); }
@@ -1067,3 +1072,183 @@ document.addEventListener("keydown", e => {
 });
 
 render();
+
+/* ---------- Copilot chat ----------
+   A right-side panel on every HR page. A message starts a background job; we poll it and
+   show each step as it finishes. Changes come back as an action card that waits for
+   Approve. Lives outside #app so moving between pages keeps the chat open. */
+const cp = { convId: null, polling: null, convs: [] };
+const CP_EXAMPLES = [
+  "Analyse the top 5 candidates for each open job",
+  "Screen the new resumes and tell me who stands out",
+  "Which interviews are missing feedback?",
+  "What is waiting for me in the review queue?",
+];
+
+async function copilotOpen() {
+  const panel = $("#copilot");
+  panel.hidden = false;
+  if (!panel.innerHTML) copilotShell();
+  try {
+    await copilotLoadList();
+    if (!cp.convId && cp.convs.length) cp.convId = cp.convs[0].id;
+    await copilotShow();
+  } catch (e) { toast(e.message, { error: true }); }
+  $("#cp-text").focus();
+}
+
+function copilotClose() {
+  $("#copilot").hidden = true;
+  clearTimeout(cp.polling);
+  cp.polling = null;
+}
+
+function copilotShell() {
+  $("#copilot").innerHTML = `
+    <div class="cp-head">${icon("message-square-text")}<h2>Copilot</h2>
+      <label class="sr-only" for="cp-convs">Past chats</label><select id="cp-convs"></select>
+      <button class="btn ghost sm" id="cp-new" title="New chat" aria-label="New chat">${icon("plus")}</button>
+      <button class="btn ghost sm" id="cp-close" aria-label="Close Copilot">${icon("x")}</button></div>
+    <div class="cp-body" id="cp-body" aria-live="polite"></div>
+    <div class="cp-foot">
+      <form id="cp-form"><label class="sr-only" for="cp-text">Ask Copilot</label>
+        <textarea id="cp-text" maxlength="2000" placeholder="Ask about candidates, jobs or interviews"></textarea>
+        <button class="btn ai" id="cp-send">${icon("send")} Ask</button></form>
+      <p class="hint">Copilot hands each step to the right assistant. Any change waits for your approval.</p>
+    </div>`;
+  paintIcons();
+  $("#cp-close").onclick = copilotClose;
+  $("#cp-new").onclick = () => { cp.convId = null; copilotShow(); $("#cp-text").focus(); };
+  $("#cp-convs").onchange = e => { cp.convId = +e.target.value || null; copilotShow(); };
+  $("#cp-form").onsubmit = e => { e.preventDefault(); copilotSend($("#cp-text").value); };
+  $("#cp-text").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); copilotSend(e.target.value); } };
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !$("#copilot").hidden && !($("#layer") && $("#layer").innerHTML)) copilotClose();
+  });
+}
+
+async function copilotLoadList() {
+  cp.convs = await api("/copilot/conversations");
+  $("#cp-convs").innerHTML = `<option value="">New chat</option>` + cp.convs.map(c =>
+    `<option value="${c.id}" ${c.id === cp.convId ? "selected" : ""}>${esc(c.title)}</option>`).join("");
+}
+
+async function copilotShow() {
+  clearTimeout(cp.polling);
+  const body = $("#cp-body");
+  if (!cp.convId) {
+    $("#cp-convs").value = "";
+    body.innerHTML = `<div class="ai-note">${icon("sparkles")}<div><b>Ask in plain language.</b> Copilot finds what it needs,
+      hands each step to the right assistant, and shows you every step. Changes such as rejecting someone are prepared
+      for your approval, never made on their own.</div></div>
+      <div class="cp-examples">${CP_EXAMPLES.map(t => `<button data-example="${esc(t)}">${esc(t)}</button>`).join("")}</div>`;
+    paintIcons();
+    $$("[data-example]", body).forEach(b => (b.onclick = () => copilotSend(b.dataset.example)));
+    return;
+  }
+  const conv = await api(`/copilot/conversations/${cp.convId}`);
+  $("#cp-convs").value = String(cp.convId);
+  body.innerHTML = conv.messages.map(copilotMessage).join("");
+  paintIcons();
+  copilotWire(body);
+  body.scrollTop = body.scrollHeight;
+  const last = conv.messages[conv.messages.length - 1];
+  if (last && last.role === "user" && last.job_id) copilotPoll(last.job_id);
+}
+
+function copilotLinked(text, steps) {
+  // Turn candidate names the steps touched into links that open the candidate.
+  let html = esc(text);
+  const seen = new Map();
+  (steps || []).forEach(s => (s.candidates || []).forEach(c => seen.set(c.name, c.id)));
+  [...seen.entries()].sort((a, b) => b[0].length - a[0].length).forEach(([name, id]) => {
+    const safe = esc(name);
+    if (safe.length > 1) html = html.split(safe).join(`<button class="linkish" data-cand="${id}">${safe}</button>`);
+  });
+  return html;
+}
+
+function copilotStep(s) {
+  const a = assistant(s.agent);
+  const g = s.grant;
+  return `<div class="cp-step ${s.ok ? "" : "failed"}">${icon(s.ok ? "circle-check" : "circle-alert")}
+    <div><div>${esc(s.summary)}</div>
+      <div class="cp-step-meta"><span>${esc(a.label)}</span>${s.duration_ms ? `<span>${(s.duration_ms / 1000).toFixed(1)} s</span>` : ""}
+      ${g ? `<span title="Single-use token ${esc(String(g.jti).slice(0, 8))}: ${esc(g.actors.join(" acting for "))}">${icon("key-round")} own token:</span>
+        ${g.scopes.map(sc => `<span class="tag">${esc(SCOPE_PLAIN[sc] || sc)}</span>`).join("")}` : ""}</div></div></div>`;
+}
+
+const CP_STATUS = { pending: "Not applied yet", approved: "Applying", done: "Applied", failed: "Partly applied", dismissed: "Dismissed" };
+
+function copilotMessage(m) {
+  if (m.role === "user") return `<div class="cp-msg user">${esc(m.content)}</div>`;
+  const steps = m.steps || [];
+  const p = m.proposal;
+  const tone = p ? ({ pending: "wait", done: "done", failed: "bad" }[p.status] || "") : "";
+  const card = p ? `<div class="cp-card"><div class="row"><b>Prepared for your approval</b>
+      <span class="tag ${tone}">${esc(CP_STATUS[p.status] || p.status)}</span></div>
+      <ul>${p.items.map(i => `<li>${esc(i.label)}</li>`).join("")}</ul>
+      ${p.status === "pending" ? `<div class="row"><button class="btn sm" data-approve="${p.id}">${icon("check")} Approve all</button>
+        <button class="btn secondary sm" data-dismiss="${p.id}">Dismiss</button></div>` : ""}</div>` : "";
+  return `<div class="cp-msg assistant"><div class="cp-answer">${copilotLinked(m.content, steps)}</div>
+    ${steps.length ? `<details class="cp-steps"><summary>${icon("chevron-right")} How Copilot did it (${steps.length} step${steps.length === 1 ? "" : "s"})</summary>
+      ${steps.map(copilotStep).join("")}</details>` : ""}${card}</div>`;
+}
+
+function copilotWire(root) {
+  $$("[data-cand]", root).forEach(b => (b.onclick = () => openCandidate(+b.dataset.cand)));
+  $$("[data-approve]", root).forEach(b => (b.onclick = () => act(b, async () => {
+    const r = await api(`/copilot/proposals/${b.dataset.approve}/approve`, { method: "POST" });
+    toast("Approved. Applying the changes now.");
+    await copilotShow();
+    copilotPoll(r.job_id, true);
+  }, { working: "Approving" })));
+  $$("[data-dismiss]", root).forEach(b => (b.onclick = () => act(b, async () => {
+    await api(`/copilot/proposals/${b.dataset.dismiss}/dismiss`, { method: "POST" });
+    toast("Dismissed. Nothing was changed.");
+    await copilotShow();
+  }, { working: "Dismissing" })));
+}
+
+async function copilotSend(text) {
+  text = (text || "").trim();
+  if (!text) return;
+  const btn = $("#cp-send");
+  btn.disabled = true;
+  try {
+    if (!cp.convId) cp.convId = (await api("/copilot/conversations", { method: "POST", body: {} })).id;
+    const r = await api(`/copilot/conversations/${cp.convId}/messages`, { method: "POST", body: { text } });
+    $("#cp-text").value = "";
+    await copilotLoadList();
+    await copilotShow();
+    copilotPoll(r.job_id);
+  } catch (e) { toast(e.message, { error: true, ms: 7000 }); }
+  finally { btn.disabled = false; }
+}
+
+function copilotPoll(jobId, refreshAfter = false) {
+  clearTimeout(cp.polling);
+  const convAtStart = cp.convId;
+  const body = $("#cp-body");
+  if (!$("#cp-live")) body.insertAdjacentHTML("beforeend", `<div class="cp-msg assistant" id="cp-live"></div>`);
+  const tick = async () => {
+    if ($("#copilot").hidden || cp.convId !== convAtStart) return;
+    let job = null;
+    try { job = await api(`/agent-jobs/${jobId}`); } catch { job = null; }
+    if (job && (job.status === "queued" || job.status === "running")) {
+      const live = $("#cp-live");
+      if (live) {
+        live.innerHTML = `<div class="cp-working">${icon("refresh-cw", "spin")} ${job.status === "queued" ? "Starting" : "Working on it"}.
+          Free AI models can take a minute per step.</div>${(job.steps || []).map(copilotStep).join("")}`;
+        paintIcons();
+        body.scrollTop = body.scrollHeight;
+      }
+      cp.polling = setTimeout(tick, 2000);
+      return;
+    }
+    if (job && job.status === "error") toast(`Copilot stopped: ${job.error}`, { error: true, ms: 8000 });
+    await copilotShow();
+    if (refreshAfter && $("#main")) render();   // approved changes may move candidates on the page behind
+  };
+  tick();
+}
