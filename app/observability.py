@@ -152,9 +152,33 @@ def trace(agent: str, action: str, user_email: str, params: dict | None = None):
     )
 
 
-def generation(model: str, messages: list[dict], model_parameters: dict | None = None):
-    """One call to a model. Use `handle.record(output=..., usage=...)` when it answers."""
+def generation(model: str, messages: list[dict], model_parameters: dict | None = None,
+               metadata: dict | None = None):
+    """One call to a model. Use `handle.record(output=..., usage=...)` when it answers.
+    `metadata` carries the prompt name and version."""
     return _observe(
         None, name="llm.chat", as_type="generation", model=model, input=messages,
-        model_parameters=model_parameters,
+        model_parameters=model_parameters, metadata=metadata or None,
     )
+
+
+def current_trace_id() -> str | None:
+    """The Langfuse trace the caller is running inside, if tracing is on."""
+    if _client is None:
+        return None
+    try:
+        return _client.get_current_trace_id()
+    except Exception as exc:
+        log.warning("Langfuse could not read the current trace id: %s", exc)
+        return None
+
+
+def score(trace_id: str | None, name: str, value: float, comment: str = "") -> None:
+    """Attach a quality score to a finished trace, e.g. what HR did with a draft."""
+    if _client is None or not trace_id:
+        return
+    try:
+        _client.create_score(trace_id=trace_id, name=name, value=float(value),
+                             data_type="NUMERIC", comment=comment or None)
+    except Exception as exc:
+        log.warning("Langfuse score '%s' failed: %s", name, exc)

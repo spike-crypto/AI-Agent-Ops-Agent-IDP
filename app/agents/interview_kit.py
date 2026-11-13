@@ -1,6 +1,8 @@
 from app.agents.base import Agent, AgentContext, draft_to_dict
+from app.prompts import Prompt
 
-SYSTEM = (
+SYSTEM = Prompt(
+    "interview_kit.system", 1,
     "You are an expert technical recruiter and hiring manager assistant. "
     "Your task is to generate a comprehensive, tailored Interview Kit for an upcoming interview. "
     "Structure your output clearly with:\n"
