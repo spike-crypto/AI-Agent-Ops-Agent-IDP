@@ -1,15 +1,19 @@
 from app.agents.base import Agent, AgentContext, draft_to_dict
+from app.prompts import Prompt
 
-REMINDER_SYSTEM = (
+REMINDER_SYSTEM = Prompt(
+    "feedback.reminder", 1,
     "You write very short, polite reminder messages asking an interviewer to submit their "
     "interview feedback. One short paragraph. Sign off as 'HR'."
 )
-SUMMARY_SYSTEM = (
+SUMMARY_SYSTEM = Prompt(
+    "feedback.summary", 1,
     "You summarise interview feedback for an HR person making a hiring decision. "
     "Be balanced: agreement, disagreement, strengths, concerns, and the average rating. "
     "Use only what the interviewers wrote. Do not make the hiring decision yourself."
 )
-DECISION_SYNTHESIS_SYSTEM = (
+DECISION_SYNTHESIS_SYSTEM = Prompt(
+    "feedback.decision_memo", 1,
     "You are an executive HR hiring assistant helping a hiring manager evaluate a candidate after all interviews. "
     "Synthesize the interviewers' feedback into an actionable Hiring Decision Recommendation Memo.\n"
     "Structure your memo clearly with:\n"

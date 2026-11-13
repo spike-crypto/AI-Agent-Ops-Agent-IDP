@@ -41,7 +41,7 @@ def test_a_fresh_database_gets_the_full_schema(tmp_path, monkeypatch):
     eng = _point_at(monkeypatch, tmp_path)
     migrations.run_migrations()
 
-    assert _version(eng) == "0002"
+    assert _version(eng) == "0003"
     assert {"users", "jobs", "candidates", "interviews", "drafts", "feedback", "agent_runs",
             "refresh_tokens", "password_resets", "agent_jobs"} <= _tables(eng)
     assert {"token_version", "failed_logins", "locked_until", "last_login_at", "mfa_secret",
@@ -50,7 +50,7 @@ def test_a_fresh_database_gets_the_full_schema(tmp_path, monkeypatch):
     assert "source" in _columns(eng, "candidates")
 
     migrations.run_migrations()  # running twice is a no-op, not an error
-    assert _version(eng) == "0002"
+    assert _version(eng) == "0003"
 
 
 def test_a_pre_alembic_database_is_upgraded_with_its_data_intact(tmp_path, monkeypatch):
@@ -69,7 +69,7 @@ def test_a_pre_alembic_database_is_upgraded_with_its_data_intact(tmp_path, monke
 
     migrations.run_migrations()
 
-    assert _version(eng) == "0002"
+    assert _version(eng) == "0003"
     assert {"token_version", "mfa_enabled"} <= _columns(eng, "users")
     assert {"location", "published"} <= _columns(eng, "jobs")
     with eng.connect() as conn:
@@ -87,5 +87,19 @@ def test_a_current_schema_missing_its_version_row_is_stamped(tmp_path, monkeypat
 
     migrations.run_migrations()
 
-    assert _version(eng) == "0002"
+    assert _version(eng) == "0003"
     assert "agent_jobs" in _tables(eng)
+
+
+def test_a_0002_schema_missing_its_version_row_still_gets_0003(tmp_path, monkeypatch):
+    """Stamping straight to head would skip 0003 and leave drafts without trace_id."""
+    eng = _point_at(monkeypatch, tmp_path)
+    command.upgrade(_cfg(), "0002")
+    assert "trace_id" not in _columns(eng, "drafts")
+    with eng.begin() as conn:
+        conn.execute(text("drop table alembic_version"))
+
+    migrations.run_migrations()
+
+    assert _version(eng) == "0003"
+    assert "trace_id" in _columns(eng, "drafts")

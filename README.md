@@ -77,6 +77,27 @@ green = done. Icons are [Lucide](https://lucide.dev) (ISC licence), vendored in 
   every model call inside it is recorded with its model, timing and token counts. Failed
   model attempts show up too. Prompts contain resume text: set `LANGFUSE_CAPTURE_CONTENT=false`
   to send no prompt or answer text. Tracing can never break an agent run.
+  Runs are grouped into Langfuse **sessions** by job opening (`job-3`), so one session shows
+  every agent run for that role; each eval run is its own session.
+
+## AgentOps: prompts, evals and feedback
+
+- **Versioned prompts.** Every system prompt is a `Prompt` with a name and a version
+  (`screening.system@v1`), defined next to its agent. The name and version go to Langfuse
+  with every model call, so a trace always says which prompt produced it. `GET /prompts`
+  (HR only) lists what is live. Changing a prompt's text without bumping its version fails
+  `tests/test_prompts.py`; after a deliberate change run `python -m app.prompts --write-lock`
+  and commit `prompts.lock.json`, so prompt changes show up in PR review.
+- **Evals.** `python -m evals.screening` scores the sample resumes with the real model and
+  checks each lands in its expected range (strong match high, designer low, the resume with a
+  hidden instruction low) and that the ranking order holds. Exit code 0 = passed, 1 = a wrong
+  answer, 2 = inconclusive (the model could not be reached, e.g. free-tier rate limits). Run it
+  whenever the screening prompt or the model list changes. Each case is an `eval.screening`
+  trace with an `eval_pass` score in Langfuse. The harness itself is tested offline in CI.
+- **HR feedback as a score.** Each draft remembers the trace of the agent run that wrote it.
+  When HR approves it unchanged, approves it after edits, or discards it, Langfuse gets an
+  `hr_review` score of 1.0, 0.5 or 0.0 on that trace. Over time this shows which agent's
+  drafts get rewritten or thrown away most.
 
 ## Run it locally
 

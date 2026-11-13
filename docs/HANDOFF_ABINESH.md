@@ -164,6 +164,10 @@ Before an interview, the interviewer gets a tailored set of questions for that c
     amber means "waiting on you"; green means done. Copy is plain, sentence case, written for an
     HR person, not a developer ("Prepare interview kit", not "Run interview_kit.prepare").
 11. Commits: no AI-tool attribution lines (no "Co-Authored-By: Claude" or similar).
+12. **Prompts are versioned.** Define a system prompt as `Prompt("agent.purpose", 1, "...")`
+    (see `app/prompts.py`). If you change a prompt's text, bump its version, run
+    `python -m app.prompts --write-lock`, and commit `prompts.lock.json`. If you change the
+    screening prompt or the model list, run `python -m evals.screening` and put the result in the PR.
 
 ## 7. Setup and daily workflow
 

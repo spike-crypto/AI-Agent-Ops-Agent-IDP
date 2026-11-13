@@ -98,6 +98,15 @@ def cancel_job(job_id: int, db: Session = Depends(get_db), user: User = Depends(
     return job_out(job)
 
 
+@router.get("/prompts")
+def list_prompts(_: User = Depends(require_hr)):
+    """Every system prompt with its version, so HR and reviewers can see what is live."""
+    from app.prompts import all_prompts
+
+    return [{"name": p.name, "version": p.version, "label": p.label, "sha256": p.sha256[:12],
+             "text": str(p)} for p in all_prompts()]
+
+
 @router.get("/agent-runs")
 def agent_runs(limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db),
                _: User = Depends(require_hr)):

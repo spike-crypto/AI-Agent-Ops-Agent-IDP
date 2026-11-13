@@ -1,0 +1,34 @@
+{
+  "comparison.system": {
+    "sha256": "c13201788723437488d21071f5939ce4338dc516a7d42b7d7d8567e788d31893",
+    "version": 1
+  },
+  "feedback.decision_memo": {
+    "sha256": "7d4ceb761b748c37bbe125b1abba7e16be996a8ac189a4db248bb65a570d83de",
+    "version": 1
+  },
+  "feedback.reminder": {
+    "sha256": "a3834e898522b5395391605823b6c22528010e73dcdb1b0deffaca1a9f76ec3a",
+    "version": 1
+  },
+  "feedback.summary": {
+    "sha256": "4cee20a0ed224cd659da67464442dbcd460033c6b16f3305febf5fd520d2b07a",
+    "version": 1
+  },
+  "interview_kit.system": {
+    "sha256": "8b54d6ccf51c9bea938884a4201c991bc7a1c34df702a4e82b1e51e125bd413c",
+    "version": 1
+  },
+  "scheduling.system": {
+    "sha256": "83eb3b49d4360182d0362815ef2593328b57a297941e31f34806ec6e688aaeee",
+    "version": 1
+  },
+  "screening.system": {
+    "sha256": "186f31e74c1935cee26bff97435bb0690f2c13d81b4105e927d7e69eb3cbc5a5",
+    "version": 1
+  },
+  "writing.system": {
+    "sha256": "278213d2a217f5b69347fcb9e864a1fe4bcc26ecdd70afc0c9e27ce67ec1e377",
+    "version": 1
+  }
+}

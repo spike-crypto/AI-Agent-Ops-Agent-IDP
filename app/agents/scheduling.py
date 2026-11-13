@@ -1,8 +1,10 @@
 from datetime import datetime
 
 from app.agents.base import Agent, AgentContext, draft_to_dict
+from app.prompts import Prompt
 
-SYSTEM = (
+SYSTEM = Prompt(
+    "scheduling.system", 1,
     "You write short, friendly interview invitation emails. List the offered time slots "
     "exactly as given and ask the candidate to reply with the one that suits them. "
     "Do not invent locations or links. Sign off as 'The Hiring Team'."

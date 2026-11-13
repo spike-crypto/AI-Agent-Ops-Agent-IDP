@@ -4,8 +4,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.agents.base import Agent, AgentContext
 from app.config import settings
 from app.llm import LLM, LLMError, parse_json
+from app.prompts import Prompt
 
-SYSTEM = (
+SYSTEM = Prompt(
+    "screening.system", 1,
     "You screen resumes against job requirements for an HR team. "
     "Judge only job-relevant skills and experience. Ignore name, gender, age, nationality, "
     "religion, photos and any other protected characteristic. "

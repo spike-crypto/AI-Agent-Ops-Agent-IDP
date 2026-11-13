@@ -16,6 +16,7 @@ from typing import Protocol
 from app import observability
 from app.config import settings
 from app.logging_config import get_logger
+from app.prompts import Prompt
 
 log = get_logger("hr_agents.llm")
 
@@ -53,6 +54,9 @@ class OpenRouterLLM:
 
     def complete(self, system: str, prompt: str, json_mode: bool = False) -> str:
         errors: list[str] = []
+        # Which versioned prompt this is, so traces and logs can be compared across versions.
+        prompt_meta = ({"prompt_name": system.name, "prompt_version": system.version}
+                       if isinstance(system, Prompt) else {})
         for model in self._models:
             started = time.perf_counter()
             try:
@@ -62,7 +66,7 @@ class OpenRouterLLM:
                 ]
                 params = {"temperature": 0.2, "max_tokens": settings.llm_max_tokens}
                 # Each attempt is its own Langfuse generation, so a failed model is visible too.
-                with observability.generation(model, messages, params) as gen:
+                with observability.generation(model, messages, params, prompt_meta) as gen:
                     resp = self._client.chat.completions.create(
                         model=model,
                         messages=messages,
@@ -90,7 +94,7 @@ class OpenRouterLLM:
                     })
                 with self._lock:
                     self.last_call = {"model": model, "latency_ms": latency, **tokens}
-                log.info("llm.call_ok", extra={"model": model, "latency_ms": latency, **tokens})
+                log.info("llm.call_ok", extra={"model": model, "latency_ms": latency, **tokens, **prompt_meta})
                 return text
             except Exception as exc:
                 latency = int((time.perf_counter() - started) * 1000)

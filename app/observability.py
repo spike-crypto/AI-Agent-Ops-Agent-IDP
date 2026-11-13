@@ -143,18 +143,44 @@ def _observe(attributes: dict | None, **observation: Any) -> Iterator[Handle]:
     _close(stack)
 
 
-def trace(agent: str, action: str, user_email: str, params: dict | None = None):
-    """One agent run. Model calls made inside it show up as its children."""
+def trace(agent: str, action: str, user_email: str, params: dict | None = None,
+          session_id: str | None = None):
+    """One agent run. Model calls made inside it show up as its children.
+    `session_id` groups related runs on Langfuse's Sessions page (we use one per job opening)."""
     name = f"{agent}.{action}"
-    return _observe(
-        {"trace_name": name, "user_id": user_email, "tags": ["hiring-desk", agent, action]},
-        name=name, as_type="agent", input=params or None,
-    )
+    attributes = {"trace_name": name, "user_id": user_email, "tags": ["hiring-desk", agent, action]}
+    if session_id:
+        attributes["session_id"] = session_id[:200]
+    return _observe(attributes, name=name, as_type="agent", input=params or None)
 
 
-def generation(model: str, messages: list[dict], model_parameters: dict | None = None):
-    """One call to a model. Use `handle.record(output=..., usage=...)` when it answers."""
+def generation(model: str, messages: list[dict], model_parameters: dict | None = None,
+               metadata: dict | None = None):
+    """One call to a model. Use `handle.record(output=..., usage=...)` when it answers.
+    `metadata` carries the prompt name and version."""
     return _observe(
         None, name="llm.chat", as_type="generation", model=model, input=messages,
-        model_parameters=model_parameters,
+        model_parameters=model_parameters, metadata=metadata or None,
     )
+
+
+def current_trace_id() -> str | None:
+    """The Langfuse trace the caller is running inside, if tracing is on."""
+    if _client is None:
+        return None
+    try:
+        return _client.get_current_trace_id()
+    except Exception as exc:
+        log.warning("Langfuse could not read the current trace id: %s", exc)
+        return None
+
+
+def score(trace_id: str | None, name: str, value: float, comment: str = "") -> None:
+    """Attach a quality score to a finished trace, e.g. what HR did with a draft."""
+    if _client is None or not trace_id:
+        return
+    try:
+        _client.create_score(trace_id=trace_id, name=name, value=float(value),
+                             data_type="NUMERIC", comment=comment or None)
+    except Exception as exc:
+        log.warning("Langfuse score '%s' failed: %s", name, exc)

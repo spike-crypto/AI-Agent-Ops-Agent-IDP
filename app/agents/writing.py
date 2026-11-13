@@ -1,6 +1,8 @@
 from app.agents.base import Agent, AgentContext, draft_to_dict
+from app.prompts import Prompt
 
-SYSTEM = (
+SYSTEM = Prompt(
+    "writing.system", 1,
     "You are an HR writing assistant for a small company. Write clear, warm, inclusive, "
     "professional text in plain prose (no markdown tables). Never invent facts such as "
     "benefits, dates or numbers that were not given to you. Keep it concise."

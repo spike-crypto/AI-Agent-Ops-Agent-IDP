@@ -102,6 +102,23 @@
 - **Health/version:** `/health` returns `version` from `app/version.txt` if present, else
   `RENDER_GIT_COMMIT`, else `dev`. The smoke test compares it with the merge commit.
 
+**AgentOps practices (added 2026-11-13):**
+- **Prompt versioning:** `app/prompts.py`. Each system prompt is `Prompt(name, version, text)` (a
+  `str` subclass) defined in its agent file; 8 prompts, all v1. `OpenRouterLLM.complete` sends
+  `prompt_name`/`prompt_version` as Langfuse generation metadata. `prompts.lock.json` + 
+  `tests/test_prompts.py` fail if text changes without a version bump
+  (`python -m app.prompts --write-lock` after a deliberate change). `GET /prompts` is HR-only.
+- **Sessions:** `runner.session_for` gives each run a Langfuse session id per job opening
+  (`job-<id>`, resolved from `job_id`, `candidate_id`, `candidate_ids` or `interview_id`); runs that
+  span jobs (feedback.chase) have none. Each eval run is one `eval-screening-<timestamp>` session.
+- **Evals:** `evals/screening.py` + `evals/screening_cases.json` (6 sample resumes with expected
+  score ranges, 3 ordering checks). `python -m evals.screening` uses the real model; exit 0/1/2 =
+  passed / wrong answer / inconclusive. Not run in CI (needs the real model); the harness is
+  tested with the stub model.
+- **HR feedback scores:** `drafts.trace_id` (migration `0003`) stores the Langfuse trace that wrote
+  a draft; `app/routers/drafts.py` sends `hr_review` = 1.0 / 0.5 / 0.0 for approved unchanged /
+  approved after edits / discarded.
+
 ## 4. CI/CD (matches the PDF, Render instead of Railway)
 
 - `.github/workflows/ci.yml`: on PR to main, job **`test`**: pytest + `docker build`.
@@ -194,7 +211,10 @@ After Part H, PRs #7 (docs), #9 (interview-kit and board fixes, approved by Abin
   models take tens of seconds per resume; the fallback list absorbs most of it.
 - Prototype: fake resumes only (`sample_data/`); free models may log prompts.
 - Interview times are naive datetimes (no timezone handling).
-- Langfuse tracing is tested offline but unverified against a real Langfuse project.
+- Langfuse verified against a real project on 2026-11-13 (traces, prompt versions, scores).
+- Evals cover only the screening agent. The first real run (2026-11-13) was inconclusive: 3 of 6
+  cases hit OpenRouter free-tier rate limits; the 3 that ran passed. Re-run when limits reset.
+- No cost tracking or alerting on failures yet (rate-limit errors are only visible in Langfuse/logs).
 - Abinesh's older local commit `f0b1a88` uses `abineshsundar@email.com`, so it is not linked to
   his GitHub profile; all his later commits are linked.
 
@@ -213,7 +233,7 @@ unbatched screening) were fixed in PR #9 and are live.
    and `feature/abinesh-interview-kit`; keep `test/break-it-on-purpose` as the Part I record.
 3. Optional, to make the review record clean: Abinesh adds an approving review to the merged
    PR #3.
-4. Add the Langfuse keys in Render (and `.env`) and confirm traces appear; add OIDC settings to turn on SSO.
+4. Add the Langfuse keys in Render (Abinesh's account; local `.env` already has them); add OIDC settings to turn on SSO.
 
 ## 10. How to verify quickly
 

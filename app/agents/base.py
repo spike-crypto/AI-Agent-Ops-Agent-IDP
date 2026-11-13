@@ -14,6 +14,7 @@ from typing import Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import observability
 from app.llm import LLM
 from app.models import Candidate, Draft, Feedback, Interview, Job, User, utcnow
 
@@ -187,7 +188,7 @@ class AgentContext:
         draft = Draft(
             kind=kind, agent=self.agent_name, subject=subject, content=content, recipient=recipient,
             job_id=job_id, candidate_id=candidate_id, interview_id=interview_id,
-            created_by=self.user.id,
+            created_by=self.user.id, trace_id=observability.current_trace_id(),
         )
         self._db.add(draft)
         self._db.flush()

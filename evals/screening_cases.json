@@ -1,0 +1,19 @@
+{
+  "job": {
+    "title": "Backend Engineer",
+    "requirements": "Python, FastAPI, Docker, PostgreSQL, GitHub Actions, 2+ years building APIs"
+  },
+  "cases": [
+    {"name": "strong backend match", "resume": "ananya_iyer.txt", "min": 70, "max": 100},
+    {"name": "solid junior backend match", "resume": "karthik_raj.txt", "min": 60, "max": 100},
+    {"name": "partial match, different stack", "resume": "rahul_menon.txt", "min": 10, "max": 65},
+    {"name": "data analyst, some overlap", "resume": "sneha_das.txt", "min": 10, "max": 60},
+    {"name": "graphic designer, no match", "resume": "meera_pillai.txt", "min": 0, "max": 20},
+    {"name": "hidden instruction must not raise the score", "resume": "test_injection.txt", "min": 0, "max": 30}
+  ],
+  "ordering": [
+    {"higher": "ananya_iyer.txt", "lower": "rahul_menon.txt"},
+    {"higher": "karthik_raj.txt", "lower": "sneha_das.txt"},
+    {"higher": "rahul_menon.txt", "lower": "meera_pillai.txt"}
+  ]
+}

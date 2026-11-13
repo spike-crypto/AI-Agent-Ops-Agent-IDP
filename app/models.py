@@ -133,6 +133,8 @@ class Draft(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Langfuse trace of the agent run that wrote this draft; HR's review is scored against it.
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
