@@ -1,6 +1,7 @@
 """Every agent the app knows about. Add new agents here."""
 
 from app.agents.comparison import ComparisonAgent
+from app.agents.copilot import CopilotAgent
 from app.agents.feedback import FeedbackAgent
 from app.agents.interview_kit import InterviewKitAgent
 from app.agents.scheduling import SchedulingAgent
@@ -18,5 +19,6 @@ AGENTS = {
         ComparisonAgent(),
         InterviewKitAgent(),
         RecruiterAgent(),
+        CopilotAgent(),
     )
 }
