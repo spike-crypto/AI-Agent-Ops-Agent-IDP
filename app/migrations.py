@@ -24,7 +24,12 @@ def run_migrations() -> None:
             # The version row was lost. Work out where the schema really is, so a newer
             # migration is not skipped by stamping straight to head.
             draft_columns = {c["name"] for c in inspect(engine).get_columns("drafts")}
-            at = "head" if "trace_id" in draft_columns else "0002"
+            if "token_grants" in tables:
+                at = "head"
+            elif "trace_id" in draft_columns:
+                at = "0003"
+            else:
+                at = "0002"
             log.info("migrations.stamp", extra={"revision": at})
             command.stamp(cfg, at)
         else:

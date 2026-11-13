@@ -151,6 +151,8 @@ class AgentRun(Base):
     summary: Mapped[str] = mapped_column(Text, default="")
     error: Mapped[str] = mapped_column(Text, default="")
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    # Set when another agent delegated this run: {"jti", "actors", "scopes"}. Never the token.
+    delegation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -172,3 +174,57 @@ class AgentJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Copilot turns append one entry per step here, for the chat's live timeline.
+    steps: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class TokenGrant(Base):
+    """Audit row for every delegated agent token. The token itself is never stored."""
+
+    __tablename__ = "token_grants"
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    audience: Mapped[str] = mapped_column(String(80))
+    actors: Mapped[list] = mapped_column(JSON, default=list)
+    scopes: Mapped[list] = mapped_column(JSON, default=list)
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Conversation(Base):
+    """A Copilot chat. Private to the HR user who started it."""
+
+    __tablename__ = "conversations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(200), default="New chat")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"), index=True)
+    role: Mapped[str] = mapped_column(String(20))  # user|assistant
+    content: Mapped[str] = mapped_column(Text, default="")
+    steps: Mapped[list] = mapped_column(JSON, default=list)
+    proposal_id: Mapped[int | None] = mapped_column(ForeignKey("action_proposals.id"), nullable=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("agent_jobs.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class ActionProposal(Base):
+    """Changes the Copilot prepared. Nothing in it happens until HR approves."""
+
+    __tablename__ = "action_proposals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    items: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|approved|dismissed|done|failed
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -6,6 +6,7 @@ from typing import Callable
 
 from sqlalchemy.orm import Session
 
+from app import identity
 from app.agents.base import ROLE_SCOPES, AgentContext, AgentPermissionError
 from app.agents.registry import AGENTS
 from app.llm import LLM
@@ -46,40 +47,58 @@ def run_agent(
     params: dict,
     progress: Callable[[int, int], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    delegation: str | None = None,
+    session_id: str | None = None,
 ) -> dict:
+    """Run one agent action. `delegation` is a token from `app.identity`: when another agent
+    calls this one, the run gets exactly the token's scopes and the token is spent."""
     agent = AGENTS.get(agent_name)
     if agent is None:
         raise LookupError(f"No agent named '{agent_name}'")
 
     started = time.perf_counter()
+    delegated: dict | None = None
 
     def record(status: str, ctx: AgentContext | None, summary: str = "", error: str = "") -> None:
         duration_ms = int((time.perf_counter() - started) * 1000)
         db.add(AgentRun(
             agent=agent_name, action=action, user_id=user.id, status=status,
             scopes_used=sorted(ctx.used) if ctx else [], summary=summary, error=error[:2000],
-            duration_ms=duration_ms,
+            duration_ms=duration_ms, delegation=delegated,
         ))
         db.commit()
         log.info(
             "agent.run",
             extra={"agent": agent_name, "action": action, "status": status, "user": user.email,
                    "duration_ms": duration_ms, "scopes": sorted(ctx.used) if ctx else [],
-                   "error": error[:300]},
+                   "error": error[:300], **({"delegation": delegated} if delegated else {})},
         )
 
+    granted = agent.scopes & ROLE_SCOPES.get(user.role, frozenset())
+    if delegation is not None:
+        try:
+            grant = identity.verify(db, delegation, identity.agent_id(agent_name))
+            if grant.user_id != user.id:
+                raise identity.TokenError("Delegated token was issued for a different user")
+        except identity.TokenError as exc:
+            db.rollback()
+            record("denied", None, error=str(exc))
+            raise
+        delegated = {"jti": grant.jti, "actors": list(grant.actors), "scopes": sorted(grant.scopes)}
+        granted = granted & grant.scopes
     if user.role not in agent.allowed_roles:
         record("denied", None, error=f"Role '{user.role}' may not run agent '{agent_name}'")
         raise AgentPermissionError(f"Role '{user.role}' may not run agent '{agent_name}'")
 
-    granted = agent.scopes & ROLE_SCOPES.get(user.role, frozenset())
     ctx = AgentContext(db, user, llm, agent_name, granted, progress=progress, should_stop=should_stop)
     try:
-        with trace(agent_name, action, user.email, params, session_for(db, params)) as run:
+        with trace(agent_name, action, user.email, params,
+                   session_id or session_for(db, params)) as run:
             result = agent.handle(ctx, action, params)
             if isinstance(result, dict):
                 run.record(output=str(result.get("summary", "")),
-                           metadata={"scopes_used": sorted(ctx.used), "role": user.role})
+                           metadata={"scopes_used": sorted(ctx.used), "role": user.role,
+                                     **({"delegation": delegated} if delegated else {})})
     except AgentPermissionError as exc:
         db.rollback()
         record("denied", ctx, error=str(exc))

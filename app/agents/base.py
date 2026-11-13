@@ -27,6 +27,8 @@ SCOPES = {
     "interview:write": "Create interviews and look up interviewers",
     "feedback:read": "Read interviewer feedback",
     "draft:write": "Create drafts for HR to review (never sends anything)",
+    "draft:read": "Read drafts waiting in the review queue",
+    "candidate:stage:write": "Move a candidate to another hiring stage (only after HR approves)",
 }
 
 ROLE_SCOPES: dict[str, frozenset[str]] = {
