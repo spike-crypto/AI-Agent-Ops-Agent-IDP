@@ -124,3 +124,25 @@ def test_bad_tool_calls_fail_politely(client, hr, job):
     assert not unknown.ok and "not found" in unknown.summary.lower()
     bad_stage = _run("propose_stage_change", {"candidate_id": 1, "stage": "fired"})
     assert not bad_stage.ok
+
+
+def test_top_n_still_reports_candidates_not_screened_yet(client, hr, job):
+    add(client, hr, job["id"], "Strong One", "Python FastAPI Docker PostgreSQL")
+    add(client, hr, job["id"], "Weak One", "Photoshop")
+    client.post("/agents/screening/screen", headers=hr, json={"job_id": job["id"]})
+    add(client, hr, job["id"], "Late Arrival", "Python")          # added after screening
+    ranked = _run("list_candidates", {"job_id": job["id"], "top": 2})
+    assert [c["name"] for c in ranked.data["candidates"]] == ["Strong One", "Weak One"]
+    assert ranked.data["total"] == 3
+    assert ranked.data["not_screened"] == ["Late Arrival"]
+    assert "2 of 3" in ranked.summary and "Late Arrival" in ranked.summary
+
+
+def test_a_stage_filter_still_reports_candidates_not_screened_yet(client, hr, job):
+    add(client, hr, job["id"], "Strong One", "Python FastAPI Docker PostgreSQL")
+    client.post("/agents/screening/screen", headers=hr, json={"job_id": job["id"]})
+    add(client, hr, job["id"], "Late Arrival", "Python")
+    ranked = _run("list_candidates", {"job_id": job["id"], "stage": "screened", "top": 3})
+    assert [c["name"] for c in ranked.data["candidates"]] == ["Strong One"]
+    assert ranked.data["not_screened"] == ["Late Arrival"]
+    assert "Late Arrival" in ranked.summary

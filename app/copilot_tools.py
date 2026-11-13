@@ -203,12 +203,19 @@ def list_candidates(db: Session, job_id: int, stage: str | None = None, top: int
     q = select(Candidate).where(Candidate.job_id == job_id)
     if stage:
         q = q.where(Candidate.status == stage)
-    cands = sorted(db.scalars(q), key=lambda c: (c.score is None, -(c.score or 0), c.id))
-    cands = cands[: max(1, min(top or MAX_TOP, MAX_TOP))]
-    unscreened = sum(c.score is None for c in cands)
-    return ToolResult(True, f"{len(cands)} candidate(s) for {job.title}"
-                      + (f", {unscreened} not screened yet" if unscreened else ""),
-                      {"job": {"id": job.id, "title": job.title}, "candidates": [_cand_row(c) for c in cands]})
+    every = sorted(db.scalars(q), key=lambda c: (c.score is None, -(c.score or 0), c.id))
+    cands = every[: max(1, min(top or MAX_TOP, MAX_TOP))]
+    # Unscreened people are counted across the whole job, so neither a stage filter nor the
+    # top-N cut hides them (rejected ones are left out: nobody needs to screen them).
+    not_screened = list(db.scalars(select(Candidate.name).where(
+        Candidate.job_id == job_id, Candidate.score.is_(None), Candidate.status != "rejected")
+        .order_by(Candidate.id)))
+    summary = f"{len(cands)} of {len(every)} candidate(s) for {job.title}"
+    if not_screened:
+        summary += f"; not screened yet: {', '.join(not_screened[:5])}" + ("..." if len(not_screened) > 5 else "")
+    return ToolResult(True, summary,
+                      {"job": {"id": job.id, "title": job.title}, "total": len(every),
+                       "not_screened": not_screened[:MAX_TOP], "candidates": [_cand_row(c) for c in cands]})
 
 
 def get_candidate(db: Session, candidate_id: int) -> ToolResult:
