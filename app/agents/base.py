@@ -210,6 +210,9 @@ class Agent:
     name: str = ""
     description: str = ""
     scopes: frozenset[str] = frozenset()
+    # Scopes the agent may carry on its token only to hand on to other agents (token exchange),
+    # never to use itself. Only an orchestrator such as the Copilot has any.
+    delegable_scopes: frozenset[str] = frozenset()
     allowed_roles: frozenset[str] = frozenset({"hr_admin"})
     actions: tuple[str, ...] = ()
 

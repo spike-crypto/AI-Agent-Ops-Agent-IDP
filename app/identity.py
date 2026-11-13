@@ -69,12 +69,13 @@ def _key() -> bytes:
 
 
 def _agent_scopes(name: str) -> frozenset[str]:
+    """Everything a token for this agent may carry: what it uses plus what it may hand on."""
     from app.agents.registry import AGENTS
 
     agent = AGENTS.get(name)
     if agent is None:
         raise TokenError(f"No agent named '{name}'")
-    return agent.scopes
+    return agent.scopes | agent.delegable_scopes
 
 
 def _naive(ts: float) -> datetime:

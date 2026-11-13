@@ -103,6 +103,8 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
        "scheduling", "propose"),
 ]}
 
+READ_SCOPES = frozenset({"job:read", "candidate:read", "interview:read", "feedback:read", "draft:read"})
+
 # Everything the Copilot may hold or pass on. Its own code only ever reads; writes happen
 # inside the agents it delegates to, each under a narrower token.
 COPILOT_SCOPES = frozenset().union(*(t.scopes for t in TOOLS.values()), {"draft:read"})

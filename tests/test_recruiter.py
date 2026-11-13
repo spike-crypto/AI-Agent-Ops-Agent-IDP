@@ -42,3 +42,10 @@ def test_no_other_agent_can_change_a_stage(client, hr, job):
             ctx = AgentContext(db, user, StubLLM(), name, agent.scopes)
             with pytest.raises(AgentPermissionError):
                 ctx.set_stage(db.get(Candidate, cid), "rejected")
+
+
+def test_the_copilot_carries_write_scopes_only_to_hand_on():
+    copilot = AGENTS["copilot"]
+    assert "candidate:stage:write" not in copilot.scopes
+    assert "candidate:stage:write" in copilot.delegable_scopes
+    assert all(s.endswith(":read") for s in copilot.scopes)
