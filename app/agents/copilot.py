@@ -12,7 +12,7 @@ import time
 
 from sqlalchemy import select
 
-from app import identity
+from app import identity, observability
 from app.agents.base import Agent, AgentContext
 from app.copilot_tools import COPILOT_SCOPES, READ_SCOPES, TOOLS, apply_item, run_tool
 from app.llm import LLMError, parse_json
@@ -145,7 +145,8 @@ class CopilotAgent(Agent):
 
         proposal = None
         if items:
-            proposal = ActionProposal(conversation_id=conv.id, user_id=ctx.user.id, items=items)
+            proposal = ActionProposal(conversation_id=conv.id, user_id=ctx.user.id, items=items,
+                                      result={"trace_id": observability.current_trace_id()})
             db.add(proposal)
             db.flush()
         reply = Message(conversation_id=conv.id, role="assistant", content=answer, steps=steps,
@@ -195,7 +196,7 @@ class CopilotAgent(Agent):
             ctx.report_step(step)
         failed = [r for r in results if not r["ok"]]
         proposal.status = "failed" if failed else "done"
-        proposal.result = {"steps": results}
+        proposal.result = {**(proposal.result or {}), "steps": results}
         text = (f"Done: {len(results) - len(failed)} of {len(results)} approved change(s) applied."
                 + (" Not applied: " + "; ".join(r["summary"] for r in failed) if failed else "")
                 + (" Drafts are in the review queue." if any("draft" in r["summary"].lower() for r in results) else ""))

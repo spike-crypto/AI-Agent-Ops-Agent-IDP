@@ -11,7 +11,7 @@ from app.agents.base import ROLE_SCOPES, AgentContext, AgentPermissionError
 from app.agents.registry import AGENTS
 from app.llm import LLM
 from app.logging_config import get_logger
-from app.models import AgentRun, Candidate, Interview, User
+from app.models import ActionProposal, AgentRun, Candidate, Interview, User
 from app.observability import trace
 
 log = get_logger("hr_agents.runner")
@@ -22,6 +22,11 @@ def session_for(db: Session, params: dict) -> str | None:
     same job (screening, comparing, invites, kits, offers) is grouped together.
     Returns None for runs that span jobs, such as chasing all missing feedback."""
     try:
+        if params.get("conversation_id") is not None:
+            return f"copilot-{int(params['conversation_id'])}"
+        if params.get("proposal_id") is not None:
+            proposal = db.get(ActionProposal, int(params["proposal_id"]))
+            return f"copilot-{proposal.conversation_id}" if proposal else None
         job_id = params.get("job_id")
         if job_id is None:
             candidate_id = params.get("candidate_id")
