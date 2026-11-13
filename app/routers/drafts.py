@@ -3,11 +3,14 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import observability
 from app.db import get_db
 from app.deps import require_hr
+from app.logging_config import get_logger
 from app.models import Draft, Job, User, utcnow
 
 router = APIRouter(tags=["drafts (human review)"])
+log = get_logger("hr_agents.drafts")
 
 
 class ApproveIn(BaseModel):
@@ -29,6 +32,16 @@ def list_drafts(status: str | None = "pending", db: Session = Depends(get_db), _
     return [draft_out(d) for d in db.scalars(q)]
 
 
+# What HR did with a draft, as a quality score on the agent run that wrote it.
+REVIEW_APPROVED, REVIEW_EDITED, REVIEW_DISCARDED = 1.0, 0.5, 0.0
+
+
+def _score_review(draft: Draft, value: float, outcome: str) -> None:
+    log.info("draft.reviewed", extra={"draft": draft.id, "kind": draft.kind, "agent": draft.agent,
+                                      "outcome": outcome, "score": value})
+    observability.score(draft.trace_id, "hr_review", value, f"{draft.kind} by {draft.agent}: {outcome}")
+
+
 def _pending_or_error(db: Session, draft_id: int) -> Draft:
     draft = db.get(Draft, draft_id)
     if draft is None:
@@ -42,6 +55,8 @@ def _pending_or_error(db: Session, draft_id: int) -> Draft:
 def approve(draft_id: int, body: ApproveIn, db: Session = Depends(get_db), user: User = Depends(require_hr)):
     """Approving marks it ready to send. v1 never sends email itself: HR copies and sends it."""
     draft = _pending_or_error(db, draft_id)
+    edited = ((body.content is not None and body.content != draft.content)
+              or (body.subject is not None and body.subject != draft.subject))
     if body.content is not None:
         draft.content = body.content
     if body.subject is not None:
@@ -54,6 +69,8 @@ def approve(draft_id: int, body: ApproveIn, db: Session = Depends(get_db), user:
         if job:
             job.description = draft.content
     db.commit()
+    _score_review(draft, REVIEW_EDITED if edited else REVIEW_APPROVED,
+                  "approved after edits" if edited else "approved unchanged")
     return draft_out(draft)
 
 
@@ -64,4 +81,5 @@ def discard(draft_id: int, db: Session = Depends(get_db), user: User = Depends(r
     draft.reviewed_by = user.id
     draft.reviewed_at = utcnow()
     db.commit()
+    _score_review(draft, REVIEW_DISCARDED, "discarded")
     return draft_out(draft)

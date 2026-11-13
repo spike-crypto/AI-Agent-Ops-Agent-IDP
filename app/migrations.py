@@ -21,8 +21,12 @@ def run_migrations() -> None:
         if "users" not in tables:
             pass  # fresh database: run 0001 then 0002
         elif "refresh_tokens" in tables:
-            log.info("migrations.stamp_head")
-            command.stamp(cfg, "head")  # already on the current schema
+            # The version row was lost. Work out where the schema really is, so a newer
+            # migration is not skipped by stamping straight to head.
+            draft_columns = {c["name"] for c in inspect(engine).get_columns("drafts")}
+            at = "head" if "trace_id" in draft_columns else "0002"
+            log.info("migrations.stamp", extra={"revision": at})
+            command.stamp(cfg, at)
         else:
             # A database from before Alembic (older local data/hr.db or a Render disk):
             # it matches 0001 exactly, so mark that as applied and upgrade it in place.
