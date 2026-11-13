@@ -87,6 +87,8 @@ def run(llm: LLM, spec: dict | None = None, pause_seconds: float = 0.0) -> EvalR
     job = spec["job"]
     report = EvalReport(prompt=SYSTEM.label, ordering_total=len(spec.get("ordering", [])))
     scores: dict[str, int | None] = {}
+    # One Langfuse session per eval run, so its cases can be read together.
+    session = f"eval-screening-{time.strftime('%Y%m%d-%H%M%S')}"
 
     for i, case in enumerate(spec["cases"]):
         if i and pause_seconds:
@@ -94,7 +96,7 @@ def run(llm: LLM, spec: dict | None = None, pause_seconds: float = 0.0) -> EvalR
         result = CaseResult(case["name"], case["resume"], case["min"], case["max"])
         text = (ROOT / "sample_data" / case["resume"]).read_text(encoding="utf-8")
         with observability.trace("eval", "screening", "eval-runner",
-                                 {"case": case["name"], "prompt": SYSTEM.label}) as run_handle:
+                                 {"case": case["name"], "prompt": SYSTEM.label}, session) as run_handle:
             trace_id = observability.current_trace_id()
             try:
                 data = ScreeningAgent._score(llm, job, text)

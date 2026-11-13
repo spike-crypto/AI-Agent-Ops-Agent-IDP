@@ -143,13 +143,15 @@ def _observe(attributes: dict | None, **observation: Any) -> Iterator[Handle]:
     _close(stack)
 
 
-def trace(agent: str, action: str, user_email: str, params: dict | None = None):
-    """One agent run. Model calls made inside it show up as its children."""
+def trace(agent: str, action: str, user_email: str, params: dict | None = None,
+          session_id: str | None = None):
+    """One agent run. Model calls made inside it show up as its children.
+    `session_id` groups related runs on Langfuse's Sessions page (we use one per job opening)."""
     name = f"{agent}.{action}"
-    return _observe(
-        {"trace_name": name, "user_id": user_email, "tags": ["hiring-desk", agent, action]},
-        name=name, as_type="agent", input=params or None,
-    )
+    attributes = {"trace_name": name, "user_id": user_email, "tags": ["hiring-desk", agent, action]}
+    if session_id:
+        attributes["session_id"] = session_id[:200]
+    return _observe(attributes, name=name, as_type="agent", input=params or None)
 
 
 def generation(model: str, messages: list[dict], model_parameters: dict | None = None,

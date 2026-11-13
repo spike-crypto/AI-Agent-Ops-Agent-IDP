@@ -77,6 +77,8 @@ green = done. Icons are [Lucide](https://lucide.dev) (ISC licence), vendored in 
   every model call inside it is recorded with its model, timing and token counts. Failed
   model attempts show up too. Prompts contain resume text: set `LANGFUSE_CAPTURE_CONTENT=false`
   to send no prompt or answer text. Tracing can never break an agent run.
+  Runs are grouped into Langfuse **sessions** by job opening (`job-3`), so one session shows
+  every agent run for that role; each eval run is its own session.
 
 ## AgentOps: prompts, evals and feedback
 

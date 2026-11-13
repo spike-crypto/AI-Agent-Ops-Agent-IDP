@@ -151,3 +151,25 @@ def test_screening_threads_keep_the_trace(client, hr, job, spans, monkeypatch):
     calls = [s for s in all_spans if s.name == "llm.chat"]
     assert len(calls) == 3
     assert all(c.context.trace_id == run.context.trace_id for c in calls)
+
+
+def test_runs_for_one_job_share_a_session(client, hr, interviewer, job, spans):
+    """Sessions page: every agent run about the same job opening is grouped as job-<id>."""
+    cid = add(client, hr, job["id"], "Asha Rao", "Python FastAPI")
+    client.post("/agents/screening/screen", headers=hr, json={"job_id": job["id"]})            # by job
+    client.post("/agents/writing/rejection", headers=hr, json={"candidate_id": cid})            # by candidate
+    iid = client.post("/agents/scheduling/propose", headers=hr, json={
+        "candidate_id": cid, "interviewer_id": interviewer["id"], "slots": ["2030-01-01T10:00"]}).json()["interview_id"]
+    client.post("/agents/interview_kit/prepare", headers=hr, json={"interview_id": iid})        # by interview
+    client.post("/agents/feedback/chase", headers=hr, json={})                                  # spans jobs
+
+    runs = {s.name: _attrs(s) for s in spans() if "." in s.name and not s.name.startswith("llm")}
+    expected = f"job-{job['id']}"
+    for name in ("screening.screen", "writing.rejection", "scheduling.propose", "interview_kit.prepare"):
+        assert expected in runs[name], name
+    assert "job-" not in runs["feedback.chase"]
+
+
+def test_session_lookup_survives_bad_parameters(client, hr, spans):
+    r = client.post("/agents/writing/rejection", headers=hr, json={"candidate_id": "not-a-number"})
+    assert r.status_code in (400, 404, 422)

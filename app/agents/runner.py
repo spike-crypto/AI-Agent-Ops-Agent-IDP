@@ -10,10 +10,31 @@ from app.agents.base import ROLE_SCOPES, AgentContext, AgentPermissionError
 from app.agents.registry import AGENTS
 from app.llm import LLM
 from app.logging_config import get_logger
-from app.models import AgentRun, User
+from app.models import AgentRun, Candidate, Interview, User
 from app.observability import trace
 
 log = get_logger("hr_agents.runner")
+
+
+def session_for(db: Session, params: dict) -> str | None:
+    """The Langfuse session for a run: one per job opening, so every agent run about the
+    same job (screening, comparing, invites, kits, offers) is grouped together.
+    Returns None for runs that span jobs, such as chasing all missing feedback."""
+    try:
+        job_id = params.get("job_id")
+        if job_id is None:
+            candidate_id = params.get("candidate_id")
+            if candidate_id is None and params.get("candidate_ids"):
+                candidate_id = params["candidate_ids"][0]
+            if candidate_id is None and params.get("interview_id") is not None:
+                interview = db.get(Interview, int(params["interview_id"]))
+                candidate_id = interview.candidate_id if interview else None
+            if candidate_id is not None:
+                candidate = db.get(Candidate, int(candidate_id))
+                job_id = candidate.job_id if candidate else None
+        return f"job-{int(job_id)}" if job_id is not None else None
+    except (TypeError, ValueError, AttributeError):
+        return None  # odd parameters are the agent's problem to report, not tracing's
 
 
 def run_agent(
@@ -54,7 +75,7 @@ def run_agent(
     granted = agent.scopes & ROLE_SCOPES.get(user.role, frozenset())
     ctx = AgentContext(db, user, llm, agent_name, granted, progress=progress, should_stop=should_stop)
     try:
-        with trace(agent_name, action, user.email, params) as run:
+        with trace(agent_name, action, user.email, params, session_for(db, params)) as run:
             result = agent.handle(ctx, action, params)
             if isinstance(result, dict):
                 run.record(output=str(result.get("summary", "")),

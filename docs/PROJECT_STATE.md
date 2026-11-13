@@ -108,6 +108,9 @@
   `prompt_name`/`prompt_version` as Langfuse generation metadata. `prompts.lock.json` + 
   `tests/test_prompts.py` fail if text changes without a version bump
   (`python -m app.prompts --write-lock` after a deliberate change). `GET /prompts` is HR-only.
+- **Sessions:** `runner.session_for` gives each run a Langfuse session id per job opening
+  (`job-<id>`, resolved from `job_id`, `candidate_id`, `candidate_ids` or `interview_id`); runs that
+  span jobs (feedback.chase) have none. Each eval run is one `eval-screening-<timestamp>` session.
 - **Evals:** `evals/screening.py` + `evals/screening_cases.json` (6 sample resumes with expected
   score ranges, 3 ordering checks). `python -m evals.screening` uses the real model; exit 0/1/2 =
   passed / wrong answer / inconclusive. Not run in CI (needs the real model); the harness is
