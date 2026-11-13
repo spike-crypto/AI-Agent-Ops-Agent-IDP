@@ -41,5 +41,11 @@ services:
         sync: false
       - key: OPENROUTER_MODELS
         value: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3.5-lightning:free
-      - key: AGENTOPS_API_KEY
+      - key: LANGFUSE_PUBLIC_KEY
         sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        value: https://cloud.langfuse.com
+      - key: LANGFUSE_CAPTURE_CONTENT
+        value: "true"

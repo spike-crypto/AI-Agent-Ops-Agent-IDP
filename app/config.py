@@ -96,7 +96,12 @@ class Settings:
         self.run_worker = _bool("RUN_WORKER", True)
         self.worker_poll_seconds = float(_env("WORKER_POLL_SECONDS", "1.0"))
 
-        self.agentops_api_key = _env("AGENTOPS_API_KEY")
+        # Langfuse tracing. Off unless both keys are set.
+        self.langfuse_public_key = _env("LANGFUSE_PUBLIC_KEY")
+        self.langfuse_secret_key = _env("LANGFUSE_SECRET_KEY")
+        self.langfuse_host = (_env("LANGFUSE_HOST", "https://cloud.langfuse.com") or "").rstrip("/")
+        # False = send timings, models and token counts only, never prompt or answer text.
+        self.langfuse_capture_content = _bool("LANGFUSE_CAPTURE_CONTENT", True)
 
         # Optional single sign-on. Leave OIDC_ISSUER empty to disable the SSO button.
         self.oidc_issuer = (_env("OIDC_ISSUER", "") or "").rstrip("/")

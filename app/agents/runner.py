@@ -1,5 +1,5 @@
 """The single entry point for running an agent: checks roles, builds the scoped
-context, traces the run in AgentOps, and writes an AgentRun audit row whatever happens."""
+context, traces the run in Langfuse, and writes an AgentRun audit row whatever happens."""
 
 import time
 from typing import Callable
@@ -54,8 +54,11 @@ def run_agent(
     granted = agent.scopes & ROLE_SCOPES.get(user.role, frozenset())
     ctx = AgentContext(db, user, llm, agent_name, granted, progress=progress, should_stop=should_stop)
     try:
-        with trace(agent_name, action, user.email):
+        with trace(agent_name, action, user.email, params) as run:
             result = agent.handle(ctx, action, params)
+            if isinstance(result, dict):
+                run.record(output=str(result.get("summary", "")),
+                           metadata={"scopes_used": sorted(ctx.used), "role": user.role})
     except AgentPermissionError as exc:
         db.rollback()
         record("denied", ctx, error=str(exc))

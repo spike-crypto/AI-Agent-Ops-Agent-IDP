@@ -13,6 +13,7 @@ import time
 from functools import lru_cache
 from typing import Protocol
 
+from app import observability
 from app.config import settings
 from app.logging_config import get_logger
 
@@ -55,31 +56,38 @@ class OpenRouterLLM:
         for model in self._models:
             started = time.perf_counter()
             try:
-                resp = self._client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.2,
-                    max_tokens=settings.llm_max_tokens,
-                )
-                text = (resp.choices[0].message.content or "").strip()
-                latency = int((time.perf_counter() - started) * 1000)
-                if not text:
-                    raise LLMError("returned an empty answer")
-                if json_mode:
-                    try:
-                        parse_json(text)
-                    except LLMError as exc:
-                        # A free model occasionally answers in prose. Treat it like
-                        # any other failed attempt and let the next model try.
-                        raise LLMError(str(exc)) from None
-                usage = getattr(resp, "usage", None)
-                tokens = {
-                    "prompt_tokens": getattr(usage, "prompt_tokens", None),
-                    "completion_tokens": getattr(usage, "completion_tokens", None),
-                }
+                messages = [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ]
+                params = {"temperature": 0.2, "max_tokens": settings.llm_max_tokens}
+                # Each attempt is its own Langfuse generation, so a failed model is visible too.
+                with observability.generation(model, messages, params) as gen:
+                    resp = self._client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        **params,
+                    )
+                    text = (resp.choices[0].message.content or "").strip()
+                    latency = int((time.perf_counter() - started) * 1000)
+                    if not text:
+                        raise LLMError("returned an empty answer")
+                    if json_mode:
+                        try:
+                            parse_json(text)
+                        except LLMError as exc:
+                            # A free model occasionally answers in prose. Treat it like
+                            # any other failed attempt and let the next model try.
+                            raise LLMError(str(exc)) from None
+                    usage = getattr(resp, "usage", None)
+                    tokens = {
+                        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                        "completion_tokens": getattr(usage, "completion_tokens", None),
+                    }
+                    gen.record(output=text, usage={
+                        k: v for k, v in (("input", tokens["prompt_tokens"]),
+                                          ("output", tokens["completion_tokens"])) if v is not None
+                    })
                 with self._lock:
                     self.last_call = {"model": model, "latency_ms": latency, **tokens}
                 log.info("llm.call_ok", extra={"model": model, "latency_ms": latency, **tokens})

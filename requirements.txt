@@ -10,4 +10,4 @@ python-dotenv
 httpx
 pypdf
 openai
-agentops
+langfuse>=5,<6
