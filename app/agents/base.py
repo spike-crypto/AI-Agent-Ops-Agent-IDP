@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app import observability
 from app.llm import LLM
-from app.models import Candidate, Draft, Feedback, Interview, Job, User, utcnow
+from app.models import CANDIDATE_STATUSES, Candidate, Draft, Feedback, Interview, Job, User, utcnow
 
 SCOPES = {
     "job:read": "Read job title, department, requirements and description",
@@ -169,6 +169,15 @@ class AgentContext:
         # Re-screening must not undo a human decision (shortlisted/rejected/offered).
         if cand.status == "new":
             cand.status = "screened"
+
+    def set_stage(self, cand: Candidate, stage: str) -> str:
+        """Move a candidate to another hiring stage. Only the Recruiter agent holds this scope,
+        and the Copilot only reaches it after HR approves. Returns the previous stage."""
+        self.require("candidate:stage:write")
+        if stage not in CANDIDATE_STATUSES:
+            raise ValueError(f"Unknown stage '{stage}'. Use one of: {', '.join(CANDIDATE_STATUSES)}")
+        previous, cand.status = cand.status, stage
+        return previous
 
     def save_feedback_summary(self, cand: Candidate, summary: str) -> None:
         self.require("candidate:write")
