@@ -1,3 +1,4 @@
+import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.agents.base import Agent, AgentContext
@@ -41,7 +42,10 @@ class ScreeningAgent(Agent):
         # Database writes stay on this thread: SQLAlchemy sessions are not thread-safe.
         with ThreadPoolExecutor(max_workers=max(1, settings.llm_concurrency)) as pool:
             futures = {
-                pool.submit(self._score, ctx.llm, job, cand.resume_text): cand
+                # copy_context carries the Langfuse trace and request id into the pool thread,
+                # so each model call is recorded under this agent run.
+                pool.submit(contextvars.copy_context().run, self._score, ctx.llm, job,
+                            cand.resume_text): cand
                 for cand in batch
                 if not ctx.stopped()
             }

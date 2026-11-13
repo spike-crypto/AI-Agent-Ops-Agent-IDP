@@ -72,8 +72,11 @@ green = done. Icons are [Lucide](https://lucide.dev) (ISC licence), vendored in 
 - Structured JSON logs with a request id per call (`LOG_JSON=true` in production), including
   login outcomes, LLM model/latency/token counts, job progress and failures. `/health` also
   runs a real one-shot LLM check and reports `llm.configured`, the model list and latency.
-- With `AGENTOPS_API_KEY` set, each run is also an **AgentOps** trace, and the LLM calls
-  inside it are captured automatically.
+- With `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` set, each agent run is also a
+  **Langfuse** trace (named like `screening.screen`, tagged with the agent and the user), and
+  every model call inside it is recorded with its model, timing and token counts. Failed
+  model attempts show up too. Prompts contain resume text: set `LANGFUSE_CAPTURE_CONTENT=false`
+  to send no prompt or answer text. Tracing can never break an agent run.
 
 ## Run it locally
 
@@ -114,7 +117,9 @@ as "Screened 12 of 20"; a candidate that still fails stays in **New** so you can
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | no | Enables the SSO button; also `OIDC_REDIRECT_URI`, `OIDC_AUTO_PROVISION`, `OIDC_DEFAULT_ROLE` |
 | `RUN_WORKER` | no | `true` (default) runs the background agent-job thread in this process |
 | `LOG_JSON`, `LOG_LEVEL` | no | Structured logs for production |
-| `AGENTOPS_API_KEY` | no | Turns on AgentOps tracing |
+| `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | no | Turn on Langfuse tracing (both needed) |
+| `LANGFUSE_HOST` | no | Defaults to `https://cloud.langfuse.com` (EU). US: `https://us.cloud.langfuse.com` |
+| `LANGFUSE_CAPTURE_CONTENT` | no | `false` keeps prompt and answer text out of traces |
 | `PORT` | Render | Render sets this; the container listens on it |
 
 ## Deploying (the code-along pipeline, on Render)

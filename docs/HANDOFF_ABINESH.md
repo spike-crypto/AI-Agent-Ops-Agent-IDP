@@ -33,7 +33,7 @@ Three ideas run through the whole codebase. **Don't break them:**
    an `AgentContext` (`app/agents/base.py`) whose methods check *scopes*. An agent can
    only do `scopes it declares ∩ scopes of the signed-in user's role`. Example: the
    screening agent can never see a job's `salary_band`.
-3. **Everything is observable.** `app/agents/runner.py` wraps every run in an AgentOps
+3. **Everything is observable.** `app/agents/runner.py` wraps every run in a Langfuse
    trace and writes an `AgentRun` audit row (success, denied or error), shown in
    *Agent activity* in the UI.
 
@@ -51,7 +51,7 @@ on every deploy.
 - `GET /dashboard` (`app/routers/dashboard.py`) powers the Today view.
 - **Auth:** email + password (PBKDF2) → JWT bearer token. Roles: `hr_admin`, `interviewer`.
   `app/deps.py` has `get_current_user`, `require_hr`, `require_role(...)`.
-- The 6 agents, the scoped `AgentContext`, the runner, the AgentRun audit log, AgentOps.
+- The 6 agents, the scoped `AgentContext`, the runner, the AgentRun audit log, Langfuse tracing.
 - LLM via **OpenRouter** free models (`app/llm.py`). There is no fake model in `app/`.
   Tests inject a stub through FastAPI dependency overrides (`tests/stub_llm.py`).
   **Never call a real API from tests.**
@@ -71,7 +71,7 @@ app/
   models.py            tables: User, Job, Candidate, Interview, Feedback, Draft, AgentRun
   security.py, deps.py login, JWT, role checks
   llm.py               OpenRouterLLM + parse_json (no fake mode in the app)
-  observability.py     AgentOps (optional, never crashes the app)
+  observability.py     Langfuse tracing (optional, never crashes the app)
   agents/
     base.py            SCOPES, ROLE_SCOPES, AgentContext (the only data access agents get), Agent base class
     registry.py        AGENTS = {...}: every agent is registered here  <-- shared file
@@ -148,7 +148,7 @@ Before an interview, the interviewer gets a tailored set of questions for that c
    `git checkout -b feature/abinesh-<feature>` → commit → push → open a PR → Bala approves.
 2. **Every feature has tests.** Run `python -m pytest -v` from the repo root before pushing.
    It must be green.
-3. **Tests never call a real LLM or AgentOps.** `tests/conftest.py` overrides the LLM
+3. **Tests never call a real LLM or Langfuse.** `tests/conftest.py` overrides the LLM
    dependency with `tests/stub_llm.py`; if your feature parses LLM output, extend the stub.
 4. **Agents only go through `AgentContext`.** No `SessionLocal`, no `ctx._db` in agent code.
    New data access = a new context method that calls `self.require("<scope>")` first.

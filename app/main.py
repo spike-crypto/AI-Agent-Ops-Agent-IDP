@@ -17,7 +17,7 @@ from app.jobqueue import start_worker, stop_worker
 from app.llm import LLM, LLMError, get_llm_optional, llm_status, parse_json
 from app.logging_config import get_logger, request_id_var, setup_logging
 from app.models import User
-from app.observability import init_observability
+from app.observability import init_observability, shutdown_observability
 from app.security import hash_password
 
 setup_logging()
@@ -68,6 +68,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         stop_worker()
+        shutdown_observability()
         log.info("app.stopped")
 
 
