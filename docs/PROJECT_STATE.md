@@ -58,7 +58,7 @@
   production (`LOG_JSON=true`), human-readable locally.
 - **Agents** (`app/agents/`). Agents never touch the DB: they get an `AgentContext` (`base.py`)
   whose methods check scopes. Effective scopes = agent's declared scopes ∩ role's scopes.
-  `runner.py` does the role check, builds the context, wraps an AgentOps trace and always writes
+  `runner.py` does the role check, builds the context, wraps a Langfuse trace and always writes
   an `AgentRun` audit row (success/denied/error). Registered in `registry.py`.
 
   | Agent | UI name | Actions | Scopes |
@@ -79,9 +79,13 @@
   `google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3.5-lightning:free`.
   Free models are slow and rate-limited (observed 429s); the fallback list is tried on timeout,
   429, empty or non-JSON answers. `/health` runs a real one-shot check and reports latency.
-- **Observability:** `app/observability.py`, AgentOps optional (`AGENTOPS_API_KEY`), never crashes
-  the app. The SDK calls (`start_trace`/`end_trace`) were written from memory and are **not
-  verified** against a real AgentOps key yet.
+- **Observability:** `app/observability.py`, Langfuse (SDK 5.x), replaced AgentOps on 2026-11-13.
+  Off unless `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` are set. `trace()` wraps each agent run
+  (called from `runner.py`); `generation()` wraps each model attempt in `OpenRouterLLM.complete`.
+  Screening copies the context into its thread pool so model calls stay under the run's trace.
+  `LANGFUSE_CAPTURE_CONTENT=false` sends no prompt/answer text. Covered by
+  `tests/test_observability.py` with an in-memory exporter; **not yet seen working against a
+  real Langfuse project** (needs keys).
 - **Prompt-injection guard:** resumes are delimited and marked untrusted; `sample_data/test_injection.txt`
   tries to force a score of 100. Verified with the real model: it scored 0.
 - **UI (the HR cockpit)** at `/`: `app/static/index.html`, `app.css`, `app.js`, vanilla JS, no
@@ -168,7 +172,7 @@ After Part H, PRs #7 (docs), #9 (interview-kit and board fixes, approved by Abin
 - **`.env`** (git-ignored, never commit): `JWT_SECRET` (required, 32+ chars),
   `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `OPENROUTER_API_KEY` (+ commented spares;
   deliberately no key rotation, which may break OpenRouter's terms), `OPENROUTER_MODELS`,
-  `AGENTOPS_API_KEY` (empty), `DATABASE_URL`, `RENDER_DEPLOY_HOOK_URL` (empty locally; the real
+  `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` (empty), `DATABASE_URL`, `RENDER_DEPLOY_HOOK_URL` (empty locally; the real
   value is only in GitHub secrets / Abinesh), `APP_URL`. `.env.example` lists every optional
   tuning key (token lifetimes, lockout, OIDC, logging). The keys were pasted in chat once;
   rotate them if that session is ever shared.
@@ -190,7 +194,7 @@ After Part H, PRs #7 (docs), #9 (interview-kit and board fixes, approved by Abin
   models take tens of seconds per resume; the fallback list absorbs most of it.
 - Prototype: fake resumes only (`sample_data/`); free models may log prompts.
 - Interview times are naive datetimes (no timezone handling).
-- AgentOps integration unverified with a real key.
+- Langfuse tracing is tested offline but unverified against a real Langfuse project.
 - Abinesh's older local commit `f0b1a88` uses `abineshsundar@email.com`, so it is not linked to
   his GitHub profile; all his later commits are linked.
 
@@ -209,7 +213,7 @@ unbatched screening) were fixed in PR #9 and are live.
    and `feature/abinesh-interview-kit`; keep `test/break-it-on-purpose` as the Part I record.
 3. Optional, to make the review record clean: Abinesh adds an approving review to the merged
    PR #3.
-4. Optional: add `AGENTOPS_API_KEY` in Render and verify traces; add OIDC settings to turn on SSO.
+4. Add the Langfuse keys in Render (and `.env`) and confirm traces appear; add OIDC settings to turn on SSO.
 
 ## 10. How to verify quickly
 
