@@ -51,6 +51,7 @@ class AgentContext:
         granted: frozenset[str],
         progress: Callable[[int, int], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        on_step: Callable[[dict], None] | None = None,
     ):
         self._db = db
         self.user = user
@@ -60,6 +61,7 @@ class AgentContext:
         self.used: set[str] = set()
         self._progress = progress
         self._should_stop = should_stop
+        self._on_step = on_step
 
     def require(self, scope: str) -> None:
         if scope not in self.granted:
@@ -71,6 +73,22 @@ class AgentContext:
     def report_progress(self, current: int, total: int) -> None:
         if self._progress is not None:
             self._progress(current, total)
+
+    def report_step(self, step: dict) -> None:
+        """An orchestrator's finished step, for the chat's live timeline."""
+        if self._on_step is not None:
+            self._on_step(step)
+
+    def orchestrator_session(self) -> Session:
+        """The database session, for an orchestrator that delegates through tokens.
+        Ordinary agents must use the scoped methods below; only an agent that can hand on
+        scopes (the Copilot) gets direct access, and it only reads with it."""
+        from app.agents.registry import AGENTS
+
+        agent = AGENTS.get(self.agent_name)
+        if agent is None or not agent.delegable_scopes:
+            raise AgentPermissionError(f"Agent '{self.agent_name}' is not an orchestrator")
+        return self._db
 
     def checkpoint(self) -> None:
         """Make finished work durable. Long runs call this between items so a crash,

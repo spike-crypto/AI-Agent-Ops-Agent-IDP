@@ -102,3 +102,27 @@ class StubLLM:
             "candidates": out,
             "open_questions": ["Ask for a concrete example of the strongest requirement."],
         })
+
+
+class ScriptedLLM:
+    """Plays the Copilot planner from a script; every other agent's call goes to StubLLM.
+
+    `answers` are the planner's replies in order (JSON strings, or LLMError instances to
+    simulate a failed model call). When the script runs out, it answers "Done."."""
+
+    def __init__(self, answers: list, fallback: "StubLLM | None" = None) -> None:
+        self.answers = list(answers)
+        self.fallback = fallback or StubLLM()
+        self.planner_prompts: list[str] = []
+        self.last_call = {"model": "scripted"}
+
+    def complete(self, system: str, prompt: str, json_mode: bool = False) -> str:
+        if getattr(system, "name", "") != "copilot.planner":
+            return self.fallback.complete(system, prompt, json_mode)
+        self.planner_prompts.append(prompt)
+        if not self.answers:
+            return json.dumps({"answer": "Done."})
+        nxt = self.answers.pop(0)
+        if isinstance(nxt, Exception):
+            raise nxt
+        return nxt if isinstance(nxt, str) else json.dumps(nxt)

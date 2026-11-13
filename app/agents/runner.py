@@ -49,6 +49,7 @@ def run_agent(
     should_stop: Callable[[], bool] | None = None,
     delegation: str | None = None,
     session_id: str | None = None,
+    on_step: Callable[[dict], None] | None = None,
 ) -> dict:
     """Run one agent action. `delegation` is a token from `app.identity`: when another agent
     calls this one, the run gets exactly the token's scopes and the token is spent."""
@@ -90,7 +91,8 @@ def run_agent(
         record("denied", None, error=f"Role '{user.role}' may not run agent '{agent_name}'")
         raise AgentPermissionError(f"Role '{user.role}' may not run agent '{agent_name}'")
 
-    ctx = AgentContext(db, user, llm, agent_name, granted, progress=progress, should_stop=should_stop)
+    ctx = AgentContext(db, user, llm, agent_name, granted, progress=progress, should_stop=should_stop,
+                       on_step=on_step)
     try:
         with trace(agent_name, action, user.email, params,
                    session_id or session_for(db, params)) as run:

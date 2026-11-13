@@ -47,7 +47,7 @@ def job_out(job: AgentJob) -> dict:
     return {
         "id": job.id, "agent": job.agent, "action": job.action, "status": job.status,
         "progress_current": job.progress_current, "progress_total": job.progress_total,
-        "result": job.result, "error": job.error,
+        "result": job.result, "error": job.error, "steps": job.steps or [],
         "created_at": job.created_at.isoformat(timespec="seconds"),
         "started_at": job.started_at.isoformat(timespec="seconds") if job.started_at else None,
         "finished_at": job.finished_at.isoformat(timespec="seconds") if job.finished_at else None,
@@ -76,6 +76,15 @@ def _set_progress(job_id: int, done: int, total: int) -> None:
         db.execute(update(AgentJob).where(AgentJob.id == job_id)
                    .values(progress_current=done, progress_total=total))
         db.commit()
+
+
+def _append_step(job_id: int, step: dict) -> None:
+    """One finished Copilot step, written straight away so the chat can show it live."""
+    with SessionLocal() as db:
+        job = db.get(AgentJob, job_id)
+        if job is not None:
+            job.steps = [*(job.steps or []), json.loads(json.dumps(step, default=str))]
+            db.commit()
 
 
 def _is_cancelled(job_id: int) -> bool:
@@ -113,6 +122,7 @@ def run_job(job_id: int) -> None:
                 db, user, llm, job.agent, job.action, job.params or {},
                 progress=lambda done, total: _set_progress(job_id, done, total),
                 should_stop=lambda: _is_cancelled(job_id),
+                on_step=lambda step: _append_step(job_id, step),
             )
         except Exception as exc:
             db.rollback()
