@@ -1077,7 +1077,7 @@ render();
    A right-side panel on every HR page. A message starts a background job; we poll it and
    show each step as it finishes. Changes come back as an action card that waits for
    Approve. Lives outside #app so moving between pages keeps the chat open. */
-const cp = { convId: null, polling: null, convs: [], finished: new Set() };  // finished: job ids that ended
+const cp = { convId: null, polling: null, pollGen: 0, convs: [], finished: new Set() };  // finished: job ids that ended
 const CP_EXAMPLES = [
   "Analyse the top 5 candidates for each open job",
   "Screen the new resumes and tell me who stands out",
@@ -1233,13 +1233,15 @@ async function copilotSend(text) {
 
 function copilotPoll(jobId, refreshAfter = false) {
   clearTimeout(cp.polling);
+  const gen = ++cp.pollGen;          // a newer poll ends this one, even mid-request
   const convAtStart = cp.convId;
   const body = $("#cp-body");
   if (!$("#cp-live")) body.insertAdjacentHTML("beforeend", `<div class="cp-msg assistant" id="cp-live"></div>`);
   const tick = async () => {
-    if ($("#copilot").hidden || cp.convId !== convAtStart) return;
+    if (gen !== cp.pollGen || $("#copilot").hidden || cp.convId !== convAtStart) return;
     let job = null;
     try { job = await api(`/agent-jobs/${jobId}`); } catch { job = null; }
+    if (gen !== cp.pollGen) return;
     if (job && (job.status === "queued" || job.status === "running")) {
       const live = $("#cp-live");
       if (live) {
