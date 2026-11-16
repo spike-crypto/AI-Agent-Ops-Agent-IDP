@@ -1,9 +1,10 @@
 # Project state: Hiring Desk (read this first)
 
-> For any agent or person continuing this work. Last updated 2026-11-12 on
-> `fix/candidate-board-bugs`, which adds the post-review hardening (auth, Postgres/Alembic,
-> background jobs, free public ATS, logging) on top of main `701fc6c`. It covers what exists,
-> why, where things are, conventions, and what to do next.
+> For any agent or person continuing this work. Last updated 2026-11-16 on `main`
+> `9b7ad59`, which merges the HR Copilot (PRs #17 and #18) on top of the post-review
+> hardening (auth, Postgres/Alembic, background jobs, free public ATS, logging), the
+> AgentOps practices (prompts, evals, Langfuse) and Abinesh's decision memo. It covers what
+> exists, why, where things are, conventions, and what to do next.
 > Abinesh's own task brief is `docs/HANDOFF_ABINESH.md`; user docs are `README.md`.
 
 ## 1. Who and what
@@ -78,8 +79,8 @@
 - **LLM:** `app/llm.py`. `OpenRouterLLM` only (OpenAI-compatible client, model fallback list,
   retries). **There is deliberately no fake model in `app/`**: without a key the AI says it is
   unavailable. Tests inject a stub via `app.dependency_overrides[get_llm_optional]`
-  (`tests/stub_llm.py`), so CI needs no key and no network. Current free models:
-  `google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3.5-lightning:free`.
+  (`tests/stub_llm.py`), so CI needs no key and no network. Current free models in
+  `render.yaml`: `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free,google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3.5-lightning:free`.
   Free models are slow and rate-limited (observed 429s); the fallback list is tried on timeout,
   429, empty or non-JSON answers. `/health` runs a real one-shot check and reports latency.
 - **Observability:** `app/observability.py`, Langfuse (SDK 5.x), replaced AgentOps on 2026-11-13.
@@ -147,9 +148,11 @@
 - GitHub settings: secret `RENDER_DEPLOY_HOOK_URL` (set by Abinesh), variable `APP_URL`
   (`https://hiring-desk-30s9.onrender.com`). Abinesh also added an unused secret `APP_URL`; harmless.
 - `render.yaml`: Docker web service `hiring-desk` (free plan, `healthCheckPath: /health`,
-  `autoDeployTrigger: off`) plus a free Postgres database wired in as `DATABASE_URL`, with
-  `APP_ENV=production` and `LOG_JSON=true`. Render must not deploy on its own, or every merge
-  deploys twice; confirm in the dashboard.
+  `autoDeployTrigger: off`) with `APP_ENV=production` and `LOG_JSON=true`. It still declares a
+  blueprint Postgres database wired in as `DATABASE_URL`, but production actually runs on the
+  Supabase URL set in the Render dashboard (§2); the blueprint database is unused and expires
+  after 30 days. Render must not deploy on its own, or every merge deploys twice; confirm in
+  the dashboard.
 - **Branch protection on main:** PR required, 1 approval, `test` check, `enforce_admins` on.
   Nobody approves their own PR.
 - **Branch housekeeping:** merging a PR deletes its head branch automatically
@@ -183,10 +186,16 @@ PR history for Part H:
 Caveat: Bala's feature reached main through #6, which Bala approved himself; Abinesh never
 formally approved #3. Everything else in "Done when" is met: main protected, both features
 merged through PRs, conflict resolved (by Abinesh), every merge produced a green Deploy run,
-`/health` shows the latest commit (`701fc6c`). Issue #4 is closed.
+`/health` shows the latest commit. Issue #4 is closed.
 
 After Part H, PRs #7 (docs), #9 (interview-kit and board fixes, approved by Abinesh) and #10
 (approval-gated branch cleanup, approved by Abinesh) merged; every Deploy run was green.
+
+PRs #12-#18 then built out the rest of the product: #12 (Abinesh's decision memo), #13
+(auth/Postgres/background jobs/free ATS hardening), #14 (Supabase docs, closed unmerged but
+its content is in this file), #15 (Langfuse replaces AgentOps), #16 (prompt versioning,
+screening evals, HR feedback scores), #17 (HR Copilot) and #18 (Copilot fixes). The live
+`/health` reports `9b7ad59`, the #18 merge commit.
 
 ## 6. Conventions (important)
 
@@ -224,7 +233,9 @@ After Part H, PRs #7 (docs), #9 (interview-kit and board fixes, approved by Abin
 
 - One container runs one web process and one in-process job worker. Horizontal scale needs a
   shared queue (the DB poll and `SKIP LOCKED` are in place; the per-process worker loop is not).
-- Render free Postgres expires after 30 days and the free web instance sleeps after ~15 min.
+- Render free Postgres expires after 30 days, so production runs on Supabase Postgres (set as
+  `DATABASE_URL` in the Render dashboard); the blueprint database in `render.yaml` is unused.
+  The free web instance sleeps after ~15 min.
 - Free OpenRouter models are slow and rate-limited (429s seen in normal use). Default `gemma`
   models take tens of seconds per resume; the fallback list absorbs most of it.
 - Prototype: fake resumes only (`sample_data/`); free models may log prompts.
@@ -242,21 +253,22 @@ unbatched screening) were fixed in PR #9 and are live.
 
 ## 9. Next steps (in order)
 
-1. Open a PR from `fix/candidate-board-bugs` and get Abinesh's approval (the hardening touches
-   auth, deploy config and shared UI, so it must go through review). On merge, Render creates
-   the Postgres database from `render.yaml`; the admin login on the live app stays whatever
-   Abinesh entered when creating the Blueprint.
-2. Housekeeping after that merge: Bala runs the `cleanup-branches` workflow; Abinesh approves
-   the `branch-cleanup` deployment, and it deletes `setup/deploy`, `feature/bala-cockpit-ui`
-   and `feature/abinesh-interview-kit`; keep `test/break-it-on-purpose` as the Part I record.
-3. Optional, to make the review record clean: Abinesh adds an approving review to the merged
+1. Review and merge the read-only MCP server PR: it exposes the six read tools at `POST /mcp`
+   (JSON-RPC) with the normal HR JWT, so SAP CPI or another MCP client can query jobs and
+   candidates without a write path. See `docs/MCP_SERVER.md`.
+2. Review the `render.yaml` PR that removes the expired blueprint Postgres and makes
+   `DATABASE_URL` a `sync: false` value (Supabase). Do not trigger a Blueprint sync until the
+   Render dashboard's manual `DATABASE_URL` has been confirmed.
+3. Housekeeping: run the `cleanup-branches` workflow for merged branches; Abinesh approves the
+   `branch-cleanup` deployment; keep `test/break-it-on-purpose` as the Part I record.
+4. Optional, to make the review record clean: Abinesh adds an approving review to the merged
    PR #3.
-4. Add the Langfuse keys in Render (Abinesh's account; local `.env` already has them); add OIDC settings to turn on SSO.
+5. Add Langfuse keys in Render if they are missing, and OIDC settings to turn on SSO.
 
 ## 10. How to verify quickly
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 100 tests, all offline
+.venv/Scripts/python.exe -m pytest -q          # 188 tests, all offline
 curl -s https://hiring-desk-30s9.onrender.com/health   # includes a real LLM check
 gh pr list --repo spike-crypto/AI-Agent-Ops-Agent-IDP --state all
 gh run list --repo spike-crypto/AI-Agent-Ops-Agent-IDP --limit 5
