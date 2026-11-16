@@ -120,12 +120,20 @@
 - Tests: `test_identity.py`, `test_recruiter.py`, `test_copilot_tools.py`, `test_copilot_agent.py`,
   `test_copilot_api.py` (scripted planner `tests/stub_llm.ScriptedLLM`).
 
-**MCP surface (read-only, added 2026-11-16):**
-- `app/routers/mcp.py` serves `POST /mcp` (JSON-RPC 2.0, protocol `2025-06-18`) for external
-  clients such as SAP CPI. It exposes the six read tools from `app/copilot_tools.py` through
-  `run_read_tool`, requires the normal HR bearer token, rate-limits 120 requests/min per user
-  and writes an `AgentRun` row (`agent="mcp"`) per call. No write or delegate tool is
-  reachable. `docs/MCP_SERVER.md`, `tests/test_mcp.py`.
+**Integrations (read-only, added 2026-11-16):**
+- Integration keys: `app/integration.py` (create, `require_integration_key` for Bearer or Basic,
+  `call`), model `IntegrationKey`, migration `0005`. HR manages them at `/integration-keys`
+  (create shows the `hdk_` key once; list; revoke). A key reads only (`job:read`,
+  `candidate:read`, `interview:read`), acts for the HR admin who made it and never works on the
+  main API.
+- Every call runs through a single-use token for `agent:integration`
+  (`app/agents/integration.py`, no actions) and writes an AgentRun with the token id and key id.
+- `app/routers/integration.py`: `/integration/v1` read endpoints (jobs, job search, a job's
+  candidates, one candidate, interviews) and `/integration/v1/openapi.json` for SAP.
+- `app/routers/mcp.py`: `POST /mcp` for direct MCP clients, same keys and path; DB work in
+  the threadpool.
+- SAP BTP setup (tutorial route, SAP generates the MCP server): `docs/SAP_INTEGRATION_SUITE.md`.
+- Tests: `tests/test_integration_api.py`, `tests/test_mcp.py`.
 
 **AgentOps practices (added 2026-11-13):**
 - **Prompt versioning:** `app/prompts.py`. Each system prompt is `Prompt(name, version, text)` (a

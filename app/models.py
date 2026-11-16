@@ -193,6 +193,25 @@ class TokenGrant(Base):
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class IntegrationKey(Base):
+    """A credential for an outside system (for example SAP Integration Suite).
+
+    It can only read, it acts for the HR admin who created it, and only its SHA-256 hash is
+    stored: the key itself is shown once, when it is created.
+    """
+
+    __tablename__ = "integration_keys"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    prefix: Mapped[str] = mapped_column(String(16))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    scopes: Mapped[list] = mapped_column(JSON, default=list)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class Conversation(Base):
     """A Copilot chat. Private to the HR user who started it."""
 

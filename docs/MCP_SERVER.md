@@ -1,26 +1,32 @@
-# MCP endpoint (read-only)
+# MCP endpoint (read-only, for direct MCP clients)
 
-`POST /mcp` lets an external tool — for example **SAP CPI** — read Hiring Desk data with the
-Model Context Protocol (JSON-RPC 2.0, protocol version `2025-06-18`). It exposes the six
-**read** tools from `app/copilot_tools.py`. Write and delegate tools (`screen`, `compare`,
-`propose_*`, `decision_memo`, `interview_kit`) are refused by name, so this surface cannot
-change the hiring record.
+`POST /mcp` lets an MCP client (Claude, the MCP Inspector, another agent) read Hiring Desk data
+with the Model Context Protocol (JSON-RPC 2.0, protocol version `2025-06-18`). It exposes the
+five **read** tools an integration key may use. Write and delegate tools (`screen`, `compare`,
+`propose_*`, `decision_memo`, `interview_kit`) and `pending_drafts` are refused by name, so
+this surface cannot change the hiring record.
 
-- Code: `app/routers/mcp.py`, entry point `run_read_tool` in `app/copilot_tools.py`.
-- Tests: `tests/test_mcp.py`.
+**SAP Integration Suite does not use this endpoint.** Its MCP Gateway generates its own MCP
+server from the REST integration API: see `docs/SAP_INTEGRATION_SUITE.md`.
+
+- Code: `app/routers/mcp.py`; every call goes through `app.integration.call`.
+- Tests: `tests/test_mcp.py`, `tests/test_integration_api.py`.
 
 ## Authentication
 
-Use the same token as the rest of the API: `POST /auth/login` with an **HR admin** account,
-then send `Authorization: Bearer <access_token>` on every request.
+Only an **integration key** works here, never a person's sign-in (a person's token unlocks the
+whole API, so it must never be stored in another system).
 
-- Missing or invalid token: `401`.
-- Interviewer token: `403` (only `hr_admin` can use the surface).
-- Access tokens last 15 minutes (`JWT_EXPIRY_MINUTES`), so a long-running integration must
-  sign in again before expiry.
-- Limit: 120 requests per minute per user (`429` with `Retry-After`).
-- Audit: every `tools/call` writes an `AgentRun` row (`agent="mcp"`, action = tool name,
-  scopes used, success/error, duration), visible under **AI activity** in the UI.
+- Create one as an HR admin: `POST /integration-keys {"name": "..."}`. The `hdk_...` key is in
+  that response only; Hiring Desk stores its SHA-256 hash.
+- Send `Authorization: Bearer hdk_...` (or Basic with the key as the password).
+- The key does not expire. Revoke it with `POST /integration-keys/{id}/revoke`; it also stops
+  if the HR admin who created it is deactivated.
+- It can only read (`job:read`, `candidate:read`, `interview:read`) and is refused on the main API.
+- Missing, wrong or revoked key: `401`. Limit: 120 requests per minute per key (`429`).
+- Audit: each call is exchanged for a single-use `agent:integration` token (`token_grants`) and
+  writes an `AgentRun` row (`agent="integration"`, the tool, the key id, the token id), shown as
+  **Integration** under **AI activity**.
 
 ## Methods
 
@@ -29,7 +35,7 @@ then send `Authorization: Bearer <access_token>` on every request.
 | `initialize` | Protocol version, `tools` capability, server name |
 | `notifications/initialized` | `202` with an empty body |
 | `ping` | `{}` |
-| `tools/list` | The six read tools with JSON schemas |
+| `tools/list` | The five read tools with JSON schemas |
 | `tools/call` | `{content, structuredContent, isError}` |
 
 ## Tools
@@ -41,7 +47,6 @@ then send `Authorization: Bearer <access_token>` on every request.
 | `list_candidates` | `job_id`, optional `stage`, optional `top` | Candidates, best score first, plus names not screened yet |
 | `get_candidate` | `candidate_id` | Stage, score, screening strengths/gaps, interviews |
 | `list_interviews` | optional `status` (`proposed`, `scheduled`, `done`, `missing_feedback`) | Interviews with feedback status |
-| `pending_drafts` | none | Drafts waiting in the review queue (titles only) |
 
 Resume text never leaves the tool layer; screening summaries derived from applicant text are
 marked `untrusted_text` in the Copilot path and are not returned raw here.
@@ -51,8 +56,7 @@ marked `untrusted_text` in the Copilot path and are not returned raw here.
 ```bash
 APP_URL=https://hiring-desk-30s9.onrender.com
 
-TOKEN=$(curl -s -X POST "$APP_URL/auth/login" -H 'Content-Type: application/json' \
-  -d '{"email":"hr@example.com","password":"..."}' | jq -r .access_token)
+TOKEN=hdk_...   # an integration key, see Authentication
 
 curl -s "$APP_URL/mcp" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize",
@@ -85,16 +89,10 @@ A successful `tools/call` returns:
 the message is in `content[0].text`. Protocol errors use JSON-RPC codes `-32700` (parse),
 `-32600` (invalid request), `-32601` (unknown method) and `-32602` (unknown tool or bad params).
 
-## SAP CPI notes
+## Notes
 
-- Use an **HTTPS sender adapter** with `POST /mcp`, `Content-Type: application/json` and a
-  `Authorization: Bearer ${token}` header. Keep the HR admin credentials in a secure
-  credential store, not in the iFlow.
-- Responses are plain JSON (no server-sent events, no session id), which maps directly to a
-  JSON-to-XML converter in CPI.
-- Refresh the token every 15 minutes by calling `/auth/login` again; a `401` means the token
-  expired or was revoked.
-- The endpoint is read-only on purpose. Anything that changes data stays in the Copilot
-  approval flow, where a human clicks **Approve all**.
-- The free Render instance sleeps after ~15 idle minutes, so the first call of the day can
-  take about a minute.
+- Responses are plain JSON (no server-sent events, no session id).
+- The free Render instance sleeps after ~15 idle minutes, so the first call can take about a
+  minute.
+- Anything that changes data stays in the Copilot approval flow, where a person clicks
+  **Approve all**.

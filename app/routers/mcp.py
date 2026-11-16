@@ -1,32 +1,33 @@
-"""Read-only MCP surface for external clients (for example SAP CPI).
+"""Read-only MCP server for clients that speak MCP directly (Claude, MCP Inspector, agents).
 
-One endpoint, `POST /mcp`, speaks JSON-RPC 2.0 over HTTP: `initialize`, `ping`,
-`tools/list` and `tools/call`. Only the read tools from `app/copilot_tools.py` are
-exposed, and every call writes an AgentRun row. Authentication is the same HR admin
-bearer token as the rest of the API; there is no anonymous access and no write path.
+SAP Integration Suite does not need this: it generates its own MCP server from the REST
+integration API (`app/routers/integration.py`). This endpoint is the direct route.
+
+`POST /mcp` speaks JSON-RPC 2.0 over HTTP: `initialize`, `ping`, `tools/list`, `tools/call`.
+It accepts only an integration key (never a person's sign-in), exposes only the read tools an
+integration key may use, and runs every call through `app.integration.call`: a single-use
+`agent:integration` token, a scope check and an AgentRun row.
 """
 
 import json
-import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app import ratelimit
-from app.copilot_tools import TOOLS, Tool, run_read_tool
+from app import integration
+from app.agents.base import AgentPermissionError
+from app.copilot_tools import Tool
 from app.db import get_db
-from app.deps import require_hr
-from app.models import AgentRun, User
 
 router = APIRouter(tags=["mcp"])
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_VERSION = "1.0.0"
-REQUESTS_PER_MINUTE = 120
 
-READ_TOOLS = {name: tool for name, tool in TOOLS.items() if tool.kind == "read"}
+READ_TOOLS = integration.INTEGRATION_TOOLS
 
 
 def _rpc_error(request_id: Any, code: int, message: str, status: int = 200) -> JSONResponse:
@@ -67,32 +68,25 @@ def _tool_out(tool: Tool) -> dict:
     }
 
 
-def _call_tool(db: Session, user: User, name: str, args: dict) -> dict:
-    started = time.perf_counter()
-    result = run_read_tool(db, name, args)
-    db.add(AgentRun(
-        agent="mcp", action=name, user_id=user.id,
-        status="success" if result.ok else "error",
-        scopes_used=sorted(READ_TOOLS[name].scopes),
-        summary=result.summary[:500], error="" if result.ok else result.summary[:2000],
-        duration_ms=int((time.perf_counter() - started) * 1000),
-    ))
-    db.commit()
-    text = json.dumps({"summary": result.summary, "data": result.data},
-                      ensure_ascii=False, default=str)
+def _call_tool(db: Session, caller: integration.Caller, name: str, args: dict) -> dict:
+    try:
+        result = integration.call(db, caller, name, args)
+        ok, summary, data = True, result.summary, result.data
+    except (LookupError, ValueError, AgentPermissionError) as exc:
+        ok, summary, data = False, f"{name} failed: {exc}", {}
+    text = json.dumps({"summary": summary, "data": data}, ensure_ascii=False, default=str)
     return {
         "content": [{"type": "text", "text": text}],
-        "structuredContent": {"summary": result.summary, "data": result.data},
-        "isError": not result.ok,
+        "structuredContent": {"summary": summary, "data": data},
+        "isError": not ok,
     }
 
 
 @router.post("/mcp")
-async def mcp(request: Request, db: Session = Depends(get_db), user: User = Depends(require_hr)):
-    allowed, retry_after = ratelimit.hit(f"mcp:{user.id}", REQUESTS_PER_MINUTE, 60)
-    if not allowed:
-        raise HTTPException(429, "Too many MCP requests", headers={"Retry-After": str(retry_after)})
-
+async def mcp(request: Request, db: Session = Depends(get_db),
+              caller: integration.Caller = Depends(integration.require_integration_key)):
+    # Async only to read the raw body (so bad JSON becomes a JSON-RPC parse error).
+    # All database work runs in the threadpool, so a slow query never blocks the server.
     try:
         body = await request.json()
     except Exception:
@@ -133,7 +127,7 @@ async def mcp(request: Request, db: Session = Depends(get_db), user: User = Depe
                                                 + ", ".join(READ_TOOLS))
         if not isinstance(args, dict):
             return _rpc_error(request_id, -32602, "arguments must be an object")
-        result = _call_tool(db, user, name, args)
+        result = await run_in_threadpool(_call_tool, db, caller, name, args)
     else:
         return _rpc_error(request_id, -32601, f"Method not found: {method}")
 
