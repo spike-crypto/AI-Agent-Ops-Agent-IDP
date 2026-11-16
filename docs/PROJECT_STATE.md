@@ -268,9 +268,10 @@ unbatched screening) were fixed in PR #9 and are live.
 
 ## 9. Next steps (in order)
 
-1. Review and merge the read-only MCP server PR: it exposes the six read tools at `POST /mcp`
-   (JSON-RPC) with the normal HR JWT, so SAP CPI or another MCP client can query jobs and
-   candidates without a write path. See `docs/MCP_SERVER.md`.
+1. Merge the integration-keys PR (migration `0005`), create a production key for SAP, then set
+   up the BTP side with `docs/SAP_INTEGRATION_SUITE.md` (destination, API artifact, MCP server,
+   Developer Hub subscription, MCP Inspector test). Until it merges, `/mcp` in production still
+   accepts an HR sign-in (PR #20 as first merged).
 2. Review the `render.yaml` PR that removes the expired blueprint Postgres and makes
    `DATABASE_URL` a `sync: false` value (Supabase). Do not trigger a Blueprint sync until the
    Render dashboard's manual `DATABASE_URL` has been confirmed.
