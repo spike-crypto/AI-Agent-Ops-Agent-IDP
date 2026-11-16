@@ -13,7 +13,7 @@
 code-along *"Build, Dockerize and Ship: CI/CD with GitHub PRs, GitHub Actions and a cloud host"*.
 We replaced the starter API with our own app. We deploy to **Render** instead of Railway.
 
-The app is for **one HR person** who runs hiring end to end. Six AI agents ("assistants" in
+The app is for **one HR person** who runs hiring end to end. Eight AI agents ("assistants" in
 the UI) do the repetitive work, and the HR person makes every decision:
 
 | Agent (code) | Name in the UI | Job |
@@ -24,6 +24,8 @@ the UI) do the repetitive work, and the HR person makes every decision:
 | `feedback` | AI Follow-up | Finds interviews missing feedback, drafts reminders, summarises feedback |
 | `comparison` | AI Comparer | Compares 2 to 4 candidates side by side. Read-only (Bala's Part H feature) |
 | `interview_kit` | AI Interview Kit | Tailored questions + rubric for one interview (your Part H feature, merged) |
+| `recruiter` | AI Recruiter | Changes a candidate's stage, only after HR approves it in Copilot |
+| `copilot` | Copilot | Answers HR in plain language and delegates each step to another agent |
 
 Three ideas run through the whole codebase. **Don't break them:**
 
@@ -37,12 +39,12 @@ Three ideas run through the whole codebase. **Don't break them:**
    trace and writes an `AgentRun` audit row (success, denied or error), shown in
    *Agent activity* in the UI.
 
-It is a **prototype**: fake resumes only (see `sample_data/`), and the SQLite database resets
-on every deploy.
+It is a **prototype**: fake resumes only (see `sample_data/`). Production data lives in
+Supabase Postgres (set as `DATABASE_URL` in Render); local dev, tests and CI use SQLite.
 
 ## 2. Status: what Bala already built (on `main`)
 
-- FastAPI backend, SQLite via SQLAlchemy 2.
+- FastAPI backend, SQLAlchemy 2; Supabase Postgres in production, SQLite in local dev and tests.
 - **The HR cockpit UI** at `/`: `app/static/index.html` (shell), `app.css` (design tokens and
   components), `app.js` (all views, vanilla JS, no build step). Icons come from **Lucide**,
   vendored at `app/static/vendor/lucide.min.js`: write `${icon("name")}` and the page paints it.
@@ -51,12 +53,17 @@ on every deploy.
 - `GET /dashboard` (`app/routers/dashboard.py`) powers the Today view.
 - **Auth:** email + password (PBKDF2) → JWT bearer token. Roles: `hr_admin`, `interviewer`.
   `app/deps.py` has `get_current_user`, `require_hr`, `require_role(...)`.
-- The 6 agents, the scoped `AgentContext`, the runner, the AgentRun audit log, Langfuse tracing.
+- The agents, the scoped `AgentContext`, the runner, the AgentRun audit log, Langfuse tracing.
+- **HR Copilot** (merged in PRs #17 and #18): `app/identity.py` (delegated single-use tokens),
+  `app/copilot_tools.py` (read/delegate/propose catalog), `app/agents/copilot.py` (plan-act
+  loop), `app/agents/recruiter.py`, `app/routers/copilot.py`, and the "Ask Copilot" panel in
+  `app/static/app.js`. Spec: `docs/superpowers/specs/2026-11-13-hr-copilot-design.md`.
 - LLM via **OpenRouter** free models (`app/llm.py`). There is no fake model in `app/`.
   Tests inject a stub through FastAPI dependency overrides (`tests/stub_llm.py`).
   **Never call a real API from tests.**
-- 100 pytest tests (`tests/`, including `test_auth_hardening.py`, `test_job_queue.py`,
-  `test_public_ats.py`, `test_migrations.py`, `test_llm.py`), Dockerfile, `render.yaml`.
+- 188 pytest tests (`tests/`, including `test_auth_hardening.py`, `test_job_queue.py`,
+  `test_public_ats.py`, `test_migrations.py`, `test_llm.py`, `test_copilot_*`), Dockerfile,
+  `render.yaml`.
 - CI/CD per the code-along PDF: `ci.yml` (job `test`: pytest + docker build on every PR) and
   `deploy.yml` (on push to main: test → Render deploy hook with the commit SHA → smoke test
   that waits for `/health` to report that commit).
@@ -68,16 +75,20 @@ on every deploy.
 app/
   main.py              FastAPI app, /health, router includes ("Feature routers" section at the bottom)
   config.py            all settings from env vars
-  models.py            tables: User, Job, Candidate, Interview, Feedback, Draft, AgentRun
+  models.py            tables: User, Job, Candidate, Interview, Feedback, Draft, AgentRun, AgentJob,
+                       TokenGrant, Conversation, Message, ActionProposal
   security.py, deps.py login, JWT, role checks
+  identity.py          delegated agent tokens (Copilot -> one agent, one action)
+  copilot_tools.py     Copilot's read/delegate/propose tool catalog
   llm.py               OpenRouterLLM + parse_json (no fake mode in the app)
   observability.py     Langfuse tracing (optional, never crashes the app)
   agents/
     base.py            SCOPES, ROLE_SCOPES, AgentContext (the only data access agents get), Agent base class
     registry.py        AGENTS = {...}: every agent is registered here  <-- shared file
     runner.py          run_agent(): role check, scoped context, trace, audit row
-    writing.py, screening.py, scheduling.py, feedback.py, comparison.py, interview_kit.py
-  routers/             auth, dashboard, jobs (+candidates), interviews, drafts, agents
+    writing.py, screening.py, scheduling.py, feedback.py, comparison.py, interview_kit.py,
+    copilot.py, recruiter.py
+  routers/             auth, dashboard, jobs (+candidates), interviews, drafts, agents, copilot
   static/              index.html, app.css, app.js (the cockpit UI), vendor/lucide.min.js (icons)
 tests/                 conftest.py has fixtures: client, hr, interviewer, job
 ```

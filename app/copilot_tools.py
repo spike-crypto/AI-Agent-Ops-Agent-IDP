@@ -264,6 +264,23 @@ _READERS = {"list_jobs": list_jobs, "find_job": find_job, "list_candidates": lis
             "pending_drafts": pending_drafts}
 
 
+def run_read_tool(db: Session, name: str, args: dict) -> ToolResult:
+    """Run one read tool for an external caller (the MCP endpoint).
+
+    The caller is already an authenticated person and this path cannot write, so no
+    delegated token is issued. Anything that is not a read tool is refused by name.
+    """
+    tool = TOOLS.get(name)
+    if tool is None or tool.kind != "read":
+        return ToolResult(False, f"'{name}' is not available on the read-only surface")
+    try:
+        return _READERS[name](db, **_coerce(tool, args or {}))
+    except (ToolInputError, LookupError, ValueError) as exc:
+        db.rollback()
+        log.info("copilot.read_tool_failed", extra={"tool": name, "error": str(exc)[:200]})
+        return ToolResult(False, f"{name} failed: {exc}")
+
+
 # ---- delegate and propose -------------------------------------------------------------------
 
 def _compact(agent: str, result: dict) -> dict:
