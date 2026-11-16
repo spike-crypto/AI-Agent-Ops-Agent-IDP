@@ -121,6 +121,13 @@
 - Tests: `test_identity.py`, `test_recruiter.py`, `test_copilot_tools.py`, `test_copilot_agent.py`,
   `test_copilot_api.py` (scripted planner `tests/stub_llm.ScriptedLLM`).
 
+**MCP surface (read-only, added 2026-11-16):**
+- `app/routers/mcp.py` serves `POST /mcp` (JSON-RPC 2.0, protocol `2025-06-18`) for external
+  clients such as SAP CPI. It exposes the six read tools from `app/copilot_tools.py` through
+  `run_read_tool`, requires the normal HR bearer token, rate-limits 120 requests/min per user
+  and writes an `AgentRun` row (`agent="mcp"`) per call. No write or delegate tool is
+  reachable. `docs/MCP_SERVER.md`, `tests/test_mcp.py`.
+
 **AgentOps practices (added 2026-11-13):**
 - **Prompt versioning:** `app/prompts.py`. Each system prompt is `Prompt(name, version, text)` (a
   `str` subclass) defined in its agent file; 8 prompts, all v1. `OpenRouterLLM.complete` sends
