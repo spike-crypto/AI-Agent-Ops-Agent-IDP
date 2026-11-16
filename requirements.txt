@@ -9,5 +9,8 @@ python-multipart
 python-dotenv
 httpx
 pypdf
+pymupdf
+pytesseract
+pillow
 openai
 langfuse>=5,<6

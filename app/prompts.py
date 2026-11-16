@@ -46,8 +46,9 @@ class Prompt(str):
 
 
 def all_prompts() -> list[Prompt]:
-    """Every prompt in the app. Importing the agent registry is what defines them."""
+    """Every prompt in the app. Importing the agent registry and processors defines them."""
     import app.agents.registry  # noqa: F401
+    import app.resume_processor  # noqa: F401
 
     return [REGISTRY[name] for name in sorted(REGISTRY)]
 

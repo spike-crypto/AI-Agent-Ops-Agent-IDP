@@ -92,7 +92,18 @@ class Candidate(Base):
     feedback_summary: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="new")
     source: Mapped[str] = mapped_column(String(20), default="manual", server_default=text("'manual'"))
+    extraction_method: Mapped[str] = mapped_column(String(40), default="standard", server_default=text("'standard'"))
+    extraction_status: Mapped[str] = mapped_column(String(40), default="completed", server_default=text("'completed'"))
+    extracted_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class Interview(Base):

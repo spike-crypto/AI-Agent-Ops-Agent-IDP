@@ -289,6 +289,7 @@ const HR_NAV = [
   null,
   ["activity", "AI activity", "activity"],
   ["team", "Team", "user-cog"],
+  ["settings", "Settings", "settings"],
   ["help", "How it works", "circle-help"],
 ];
 const IV_NAV = [["mine", "My interviews", "calendar-days"], ["help", "How it works", "circle-help"]];
@@ -322,7 +323,7 @@ async function render() {
   $("#signout").onclick = signOut;
   if (hr) $("#copilot-open").onclick = () => copilotOpen();
   const views = { today: viewToday, candidates: viewCandidates, jobs: viewJobs, interviews: viewInterviews, review: viewReview,
-    activity: viewActivity, team: viewTeam, help: viewHelp, mine: viewMine };
+    activity: viewActivity, team: viewTeam, settings: viewSettings, help: viewHelp, mine: viewMine };
   try { await (views[state.view] || viewToday)(); }
   catch (e) { $("#main").innerHTML = `<div class="panel empty">${icon("circle-alert")}<h3>This page could not load</h3><p>${esc(e.message)}</p></div>`; }
   paintIcons();
@@ -543,6 +544,7 @@ async function viewCandidates() {
       <select id="jobsel">${jobs.map(j => `<option value="${j.id}" ${j.id === job.id ? "selected" : ""}>${esc(j.title)}</option>`).join("")}</select>
       <label class="btn secondary" for="files" tabindex="0">${icon("upload")} Add resumes</label>
       <input id="files" type="file" multiple accept=".txt,.md,.pdf" class="sr-only">
+      <button class="btn ghost sm" id="settings-quick" title="Configure Resume Processing Engine">${icon("settings")} Engine</button>
       <button class="btn ai" id="screen" ${newCount ? "" : "disabled"} title="${newCount ? "" : "No new resumes to screen"}">${icon("sparkles")} Screen ${newCount ? plural(newCount, "new resume", "new resumes") : "new resumes"}</button>
       <span class="muted small">Tick 2 to 4 candidates to compare them.</span>
     </div>
@@ -570,6 +572,7 @@ async function viewCandidates() {
     } catch (err) { toast(err.message, { error: true }); }
   };
   $("#screen").onclick = e => screenJob(job.id, e.currentTarget);
+  const sq = $("#settings-quick"); if (sq) sq.onclick = () => go("settings");
   $$(".card").forEach(el => (el.onclick = e => {
     if (e.target.closest("input")) return;
     openCandidate(+el.dataset.id);
@@ -613,13 +616,25 @@ async function screenJob(jobId, btn) {
 
 function card(c) {
   const sel = state.selected.has(c.id);
+  const method = c.extraction_method || "standard";
+  const methodLabel = {
+    standard: "Parser",
+    ocr: "OCR",
+    ai: "AI",
+    hybrid: "Hybrid",
+    "hybrid (standard)": "Hybrid",
+    "hybrid (ocr fallback)": "OCR Fallback",
+  }[method] || method;
   return `<div class="card ${sel ? "selected" : ""}" data-id="${c.id}" role="button" tabindex="0" aria-label="Open ${esc(c.name)}">
     <div class="card-top">
       <input type="checkbox" data-pick="${c.id}" ${sel ? "checked" : ""} aria-label="Select ${esc(c.name)} to compare">
       <span class="card-name" title="${esc(c.name)}">${esc(c.name)}</span>
       <span class="score ${c.score == null ? "none" : ""}" title="${c.score == null ? "Not screened yet" : "AI Screener score out of 100"}">${c.score ?? "–"}</span>
     </div>
-    ${c.source === "careers" ? `<div class="small muted">${icon("globe")} Applied on the careers page</div>` : ""}
+    <div style="display:flex;gap:6px;align-items:center;margin:4px 0">
+      <span class="tag sm" style="font-size:11px" title="Extraction method: ${esc(method)}">${icon("file-text")}${esc(methodLabel)}</span>
+      ${c.source === "careers" ? `<span class="tag sm" style="font-size:11px">${icon("globe")}Careers</span>` : ""}
+    </div>
     ${c.screening?.summary ? `<div class="card-sum">${esc(c.screening.summary)}</div>` : ""}
   </div>`;
 }
@@ -723,6 +738,33 @@ async function openCandidate(id) {
           : `<p class="small muted">No interviews yet.</p>`}
         </section>
 
+        <section class="panel panel-pad" style="display:grid;gap:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <h3 style="margin:0;display:flex;align-items:center;gap:6px">${icon("file-check")} Extracted profile</h3>
+              <span class="tag ai">${esc(c.extraction_method || "standard")}</span>
+              <span class="tag ${c.extraction_status === "completed" ? "done" : "bad"}">${esc(c.extraction_status || "completed")}</span>
+            </div>
+            <div style="display:flex;gap:6px">
+              <button class="btn secondary sm" id="edit-ext">${icon("pencil")} Correct details</button>
+              <button class="btn ghost sm" id="reprocess-ext">${icon("refresh-cw")} Reprocess</button>
+            </div>
+          </div>
+          ${(c.extracted_data?.warnings || []).length ? `<div class="info-note" style="border-left:3px solid var(--wait)">${icon("triangle-alert")}<div><b>Extraction notice:</b> ${esc((c.extracted_data.warnings || []).join(". "))}</div></div>` : ""}
+          <div>
+            <div class="small muted" style="margin-bottom:4px">Skills</div>
+            <div>${(c.extracted_data?.skills || []).length ? (c.extracted_data.skills).map(sk => `<span class="tag sm" style="margin:2px 4px 2px 0">${esc(sk)}</span>`).join("") : `<span class="small muted">None extracted</span>`}</div>
+          </div>
+          ${(c.extracted_data?.education || []).length ? `<div>
+            <div class="small muted" style="margin-bottom:4px">Education</div>
+            <div class="stack" style="gap:4px">${(c.extracted_data.education).map(e => `<div class="small"><b>${esc(typeof e === "string" ? e : (e.degree || e.institution || "Degree"))}</b>${e.institution && e.degree ? ` · ${esc(e.institution)}` : ""}${e.year ? ` (${esc(e.year)})` : ""}</div>`).join("")}</div>
+          </div>` : ""}
+          ${(c.extracted_data?.experience || []).length ? `<div>
+            <div class="small muted" style="margin-bottom:4px">Experience</div>
+            <div class="stack" style="gap:4px">${(c.extracted_data.experience).map(x => `<div class="small"><b>${esc(typeof x === "string" ? x : (x.title || "Position"))}</b>${x.company ? ` at ${esc(x.company)}` : ""}${x.duration ? ` (${esc(x.duration)})` : ""}${x.description ? `<div class="muted">${esc(x.description)}</div>` : ""}</div>`).join("")}</div>
+          </div>` : ""}
+        </section>
+
         <section><details><summary>${icon("chevron-right")} Resume</summary><pre class="resume" style="margin-top:10px">${esc(c.resume_text)}</pre></details></section>
 
         <section><label class="field">Change stage manually <span class="hint">Use this to correct a mistake.</span>
@@ -730,6 +772,10 @@ async function openCandidate(id) {
       </div>
     </aside>`;
   paintIcons();
+  const editBtn = $("#edit-ext");
+  if (editBtn) editBtn.onclick = () => openEditExtraction(c);
+  const reprocBtn = $("#reprocess-ext");
+  if (reprocBtn) reprocBtn.onclick = () => openReprocessModal(c);
   $$("[data-closedrawer]").forEach(b => (b.onclick = closeDrawer));
   document.addEventListener("keydown", escClose);
   $(".drawer [data-closedrawer].btn").focus();
@@ -777,6 +823,86 @@ async function openCandidate(id) {
 async function refreshAfterDrawer(id) { await render(); await openCandidate(id); }
 function escClose(e) { if (e.key === "Escape") closeDrawer(); }
 function closeDrawer() { const l = $("#layer"); if (l) l.innerHTML = ""; document.removeEventListener("keydown", escClose); }
+
+function openEditExtraction(c) {
+  const ext = c.extracted_data || {};
+  const skillsStr = (ext.skills || []).join(", ");
+  openModal(`
+    <form id="ext-form">
+      <div class="modal-head">${icon("pencil")}<h2>Correct extracted candidate details</h2></div>
+      <div class="modal-body stack" style="gap:12px">
+        <p class="small muted">Review and correct extracted details before screening. Updating will save these fields directly to the candidate profile.</p>
+        <div class="form-grid">
+          <label class="field">Candidate name<input name="name" value="${esc(c.name)}" required></label>
+          <label class="field">Email address<input name="email" type="email" value="${esc(c.email || "")}"></label>
+        </div>
+        <label class="field">Skills (comma-separated)<input name="skills" value="${esc(skillsStr)}" placeholder="Python, FastAPI, Docker"></label>
+        <label class="field">Extracted resume text<textarea name="resume_text" rows="8" style="font-family:monospace;font-size:12px">${esc(c.resume_text)}</textarea></label>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn secondary" data-close>Cancel</button>
+        <button type="submit" class="btn">${icon("save")} Save corrections</button>
+      </div>
+    </form>
+  `);
+  paintIcons();
+  $("#ext-form").onsubmit = e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const skillsList = (f.get("skills") || "").split(",").map(s => s.trim()).filter(Boolean);
+    act($("button[type=submit]", e.target), async () => {
+      await api(`/candidates/${c.id}/extraction`, {
+        method: "PATCH",
+        body: {
+          name: f.get("name"),
+          email: f.get("email"),
+          skills: skillsList,
+          resume_text: f.get("resume_text"),
+        },
+      });
+      closeModal();
+      toast("Candidate details corrected.");
+      await refreshAfterDrawer(c.id);
+    }, { working: "Saving" });
+  };
+}
+
+function openReprocessModal(c) {
+  openModal(`
+    <form id="reproc-form">
+      <div class="modal-head">${icon("refresh-cw")}<h2>Reprocess resume</h2></div>
+      <div class="modal-body stack" style="gap:12px">
+        <p class="small muted">Re-run the extraction pipeline on this resume with a chosen mode:</p>
+        <label class="field">Extraction mode
+          <select name="mode">
+            <option value="hybrid">Hybrid (Parser -> OCR -> AI fallback)</option>
+            <option value="standard">Standard PDF Parser (PyMuPDF)</option>
+            <option value="ocr">OCR (Tesseract)</option>
+            <option value="ai">AI Extraction (LLM)</option>
+          </select>
+        </label>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn secondary" data-close>Cancel</button>
+        <button type="submit" class="btn ai">${icon("sparkles")} Reprocess</button>
+      </div>
+    </form>
+  `);
+  paintIcons();
+  $("#reproc-form").onsubmit = e => {
+    e.preventDefault();
+    const mode = new FormData(e.target).get("mode");
+    act($("button[type=submit]", e.target), async () => {
+      await api(`/candidates/${c.id}/reprocess`, {
+        method: "POST",
+        body: { mode },
+      });
+      closeModal();
+      toast(`Resume reprocessed using ${mode}.`);
+      await refreshAfterDrawer(c.id);
+    }, { working: "Processing", slow: true });
+  };
+}
 
 /* ---------- Interviews ---------- */
 async function viewInterviews() {
@@ -1000,6 +1126,51 @@ async function viewTeam() {
   }, { working: "Creating" })));
   $("#mfa-toggle").onclick = () => state.user.mfa_enabled ? openMfaDisable() : openMfaSetup();
   $("#signout-all").onclick = () => signOutEverywhere();
+}
+
+/* ---------- Settings ---------- */
+async function viewSettings() {
+  const s = await api("/settings/resume-processor");
+  $("#main").innerHTML = `
+    ${head("Settings", "Configure HR cockpit engine settings and resume processing pipeline.")}
+    <div class="stack">
+      <section class="panel">
+        <div class="panel-head"><h2>${icon("cpu")} Resume Processing Engine</h2></div>
+        <div class="panel-pad stack" style="gap:16px">
+          <p class="muted">Select how resumes are extracted and structured when uploaded to Hiring Desk. The engine isolates resume contents as untrusted applicant input.</p>
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <span class="tag ${s.tesseract_available ? "done" : "bad"}">${icon(s.tesseract_available ? "circle-check" : "circle-alert")} Tesseract OCR: ${s.tesseract_available ? "Available" : "Not in PATH"}</span>
+            <span class="tag ${s.llm_available ? "done" : "bad"}">${icon(s.llm_available ? "circle-check" : "circle-alert")} AI LLM Provider: ${s.llm_available ? "Configured" : "Missing API Key"}</span>
+          </div>
+          <form id="resumesettingsform" class="stack" style="gap:14px">
+            <div style="display:grid;gap:10px">
+              ${s.available_modes.map(m => `
+                <label class="panel panel-pad" style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;border-color:${s.mode === m.id ? "var(--primary)" : "var(--line)"}">
+                  <input type="radio" name="mode" value="${esc(m.id)}" ${s.mode === m.id ? "checked" : ""} style="margin-top:4px">
+                  <div>
+                    <div style="font-weight:600;color:var(--ink)">${esc(m.label)}</div>
+                    <div class="small muted" style="margin-top:3px">${esc(m.description)}</div>
+                  </div>
+                </label>
+              `).join("")}
+            </div>
+            <div>
+              <button class="btn" type="submit">${icon("save")} Save settings</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
+  `;
+  $("#resumesettingsform").onsubmit = e => {
+    e.preventDefault();
+    const mode = new FormData(e.target).get("mode");
+    act($("button[type=submit]", e.target), async () => {
+      await api("/settings/resume-processor", { method: "PUT", body: { mode } });
+      toast(`Resume processing mode set to ${mode}.`);
+      render();
+    }, { working: "Saving" });
+  };
 }
 
 /* ---------- How it works ---------- */

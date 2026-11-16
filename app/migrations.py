@@ -24,8 +24,11 @@ def run_migrations() -> None:
             # The version row was lost. Work out where the schema really is, so a newer
             # migration is not skipped by stamping straight to head.
             draft_columns = {c["name"] for c in inspect(engine).get_columns("drafts")}
-            if "integration_keys" in tables:
+            candidate_columns = {c["name"] for c in inspect(engine).get_columns("candidates")}
+            if "system_settings" in tables or "extraction_method" in candidate_columns:
                 at = "head"
+            elif "integration_keys" in tables:
+                at = "0005"
             elif "token_grants" in tables:
                 at = "0004"
             elif "trace_id" in draft_columns:
