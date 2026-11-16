@@ -41,7 +41,7 @@ def test_a_fresh_database_gets_the_full_schema(tmp_path, monkeypatch):
     eng = _point_at(monkeypatch, tmp_path)
     migrations.run_migrations()
 
-    assert _version(eng) == "0005"
+    assert _version(eng) == "0006"
     assert {"users", "jobs", "candidates", "interviews", "drafts", "feedback", "agent_runs",
             "refresh_tokens", "password_resets", "agent_jobs"} <= _tables(eng)
     assert {"token_version", "failed_logins", "locked_until", "last_login_at", "mfa_secret",
@@ -50,7 +50,7 @@ def test_a_fresh_database_gets_the_full_schema(tmp_path, monkeypatch):
     assert "source" in _columns(eng, "candidates")
 
     migrations.run_migrations()  # running twice is a no-op, not an error
-    assert _version(eng) == "0005"
+    assert _version(eng) == "0006"
 
 
 def test_a_pre_alembic_database_is_upgraded_with_its_data_intact(tmp_path, monkeypatch):
@@ -69,7 +69,7 @@ def test_a_pre_alembic_database_is_upgraded_with_its_data_intact(tmp_path, monke
 
     migrations.run_migrations()
 
-    assert _version(eng) == "0005"
+    assert _version(eng) == "0006"
     assert {"token_version", "mfa_enabled"} <= _columns(eng, "users")
     assert {"location", "published"} <= _columns(eng, "jobs")
     with eng.connect() as conn:
@@ -87,7 +87,7 @@ def test_a_current_schema_missing_its_version_row_is_stamped(tmp_path, monkeypat
 
     migrations.run_migrations()
 
-    assert _version(eng) == "0005"
+    assert _version(eng) == "0006"
     assert "agent_jobs" in _tables(eng)
 
 
@@ -101,7 +101,7 @@ def test_a_0002_schema_missing_its_version_row_still_gets_0003(tmp_path, monkeyp
 
     migrations.run_migrations()
 
-    assert _version(eng) == "0005"
+    assert _version(eng) == "0006"
     assert "trace_id" in _columns(eng, "drafts")
 
 
@@ -113,7 +113,7 @@ def test_a_0003_schema_missing_its_version_row_still_gets_0004(tmp_path, monkeyp
 
     migrations.run_migrations()
 
-    assert _version(eng) == "0005"
+    assert _version(eng) == "0006"
     assert {"token_grants", "conversations", "messages", "action_proposals"} <= _tables(eng)
     assert "steps" in _columns(eng, "agent_jobs") and "delegation" in _columns(eng, "agent_runs")
 
@@ -133,5 +133,31 @@ def test_a_0004_schema_missing_its_version_row_still_gets_0005(tmp_path, monkeyp
 
     migrations.run_migrations()
 
-    assert _version(eng) == "0005"
+    assert _version(eng) == "0006"
     assert "integration_keys" in _tables(eng)
+
+
+def test_a_database_already_at_0006_starts_and_still_takes_candidates(tmp_path, monkeypatch):
+    """Production's Supabase was migrated to 0006 from PR #23's branch before #23 merged.
+    The app must recognise 0006, start, and keep adding candidates (the extra columns have
+    server defaults)."""
+    eng = _point_at(monkeypatch, tmp_path)
+    command.upgrade(_cfg(), "head")
+    assert _version(eng) == "0006"
+    migrations.run_migrations()          # a restart: nothing to do, must not raise
+    assert _version(eng) == "0006"
+    from sqlalchemy.orm import Session
+
+    from app.models import Candidate, Job, User
+    with Session(eng) as db:              # main's models do not know the 0006 columns
+        hr = User(email="a@b.c", name="A", password_hash="x", role="hr_admin")
+        db.add(hr)
+        db.flush()
+        job = Job(title="Backend", requirements="Python", created_by=hr.id)
+        db.add(job)
+        db.flush()
+        db.add(Candidate(job_id=job.id, name="Asha", resume_text="Python"))
+        db.commit()
+    with eng.connect() as conn:
+        row = conn.execute(text("select extraction_method, extraction_status from candidates")).one()
+    assert tuple(row) == ("standard", "completed")
