@@ -151,3 +151,54 @@ def test_cancel_is_scoped_to_the_owner(client, hr, interviewer, job):
     assert client.post(f"/agent-jobs/{job_id}/cancel",
                        headers=interviewer["headers"]).status_code == 404
     assert _job_out(client, hr, job_id)["status"] == "queued"
+
+
+# ---- jobs cut off by a restart or a sleeping instance --------------------------------------
+
+def _running_since(minutes_ago, **fields):
+    from datetime import timedelta
+
+    from app.models import utcnow
+    with SessionLocal() as db:
+        hr = db.query(User).filter_by(email="hr@example.com").one()
+        row = AgentJob(user_id=hr.id, status="running", started_at=utcnow() - timedelta(minutes=minutes_ago),
+                       **{"agent": "screening", "action": "screen", "params": {}, **fields})
+        db.add(row)
+        db.commit()
+        return row.id
+
+
+def test_a_job_cut_off_mid_run_is_marked_failed(client, hr):
+    old = _running_since(90)
+    recent = _running_since(5)
+    assert jobqueue.recover_abandoned() == 1
+    with SessionLocal() as db:
+        assert db.get(AgentJob, old).status == "error"
+        assert "interrupted" in db.get(AgentJob, old).error.lower()
+        assert db.get(AgentJob, recent).status == "running"     # may still be working
+
+
+def test_an_abandoned_copilot_turn_still_answers(client, hr):
+    from app.models import Conversation, Message
+    with SessionLocal() as db:
+        user = db.query(User).filter_by(email="hr@example.com").one()
+        conv = Conversation(user_id=user.id, title="Top DevOps")
+        db.add(conv)
+        db.commit()
+        conv_id = conv.id
+    # A turn has a hard 4-minute limit, so 15 minutes "running" means the worker died.
+    job_id = _running_since(15, agent="copilot", action="turn", params={"conversation_id": conv_id})
+    assert jobqueue.recover_abandoned() == 1
+    with SessionLocal() as db:
+        assert db.get(AgentJob, job_id).status == "error"
+        reply = db.query(Message).filter_by(conversation_id=conv_id).one()
+        assert reply.role == "assistant" and reply.content.startswith("Copilot stopped")
+
+
+def test_the_worker_recovers_abandoned_jobs_when_it_starts(client, hr, monkeypatch):
+    old = _running_since(90)
+    monkeypatch.setattr(jobqueue, "_loop", lambda: None)       # do not start the real loop
+    jobqueue.start_worker()
+    jobqueue.stop_worker()
+    with SessionLocal() as db:
+        assert db.get(AgentJob, old).status == "error"
