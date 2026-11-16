@@ -1,6 +1,6 @@
 # Hiring Desk: HR agents with a human in charge
 
-A prototype for **one HR person** who runs hiring end to end. Six AI agents do the
+A prototype for **one HR person** who runs hiring end to end. Eight AI agents do the
 repetitive work. The HR person makes every decision, and nothing goes to a candidate
 or interviewer until they have approved it.
 
