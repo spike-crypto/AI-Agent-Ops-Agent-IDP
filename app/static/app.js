@@ -36,7 +36,7 @@ const ASSISTANTS = {
   interview_kit: { label: "AI Interview Kit", icon: "clipboard-check", does: "Prepares tailored questions and an evaluation rubric for an interview." },
   recruiter: { label: "AI Recruiter", icon: "user-check", does: "Moves a candidate to another stage, only after you approve it in Copilot." },
   copilot: { label: "Copilot", icon: "message-square-text", does: "Answers your questions in plain language by handing each step to the right assistant." },
-  mcp: { label: "MCP client", icon: "plug", does: "Reads jobs and candidates through the read-only MCP endpoint, for example from SAP CPI." },
+  integration: { label: "Integration", icon: "plug", does: "Reads jobs, candidates and interviews for an outside system, such as SAP Integration Suite, using a read-only integration key." },
 };
 const assistant = name => ASSISTANTS[name] || { label: name, icon: "sparkles", does: "" };
 const DRAFT_KIND = {
