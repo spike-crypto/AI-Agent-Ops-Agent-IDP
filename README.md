@@ -108,6 +108,15 @@ green = done. Icons are [Lucide](https://lucide.dev) (ISC licence), vendored in 
   not by the network. It buys least privilege per step, replay protection and a full
   delegation audit trail today, and the same token format works if agents become services.
 
+## MCP endpoint (read-only)
+
+`POST /mcp` speaks JSON-RPC 2.0 (MCP protocol `2025-06-18`) for external tools such as
+**SAP CPI**. It exposes only the six read tools from `app/copilot_tools.py`; write and
+delegate tools are refused by name. Auth is the normal HR admin bearer token, every call
+writes an `AgentRun` row, and calls are limited to 120 per minute per user. Clients call
+`initialize`, `tools/list`, then `tools/call`. See `docs/MCP_SERVER.md` for curl examples
+and CPI notes; `tests/test_mcp.py` covers the protocol, auth and audit.
+
 ## AgentOps: prompts, evals and feedback
 
 - **Versioned prompts.** Every system prompt is a `Prompt` with a name and a version
