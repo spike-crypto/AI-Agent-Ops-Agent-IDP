@@ -8,6 +8,7 @@ On Postgres the claim uses FOR UPDATE SKIP LOCKED, so several workers/instances 
 import json
 import threading
 import time
+from datetime import timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -25,6 +26,12 @@ log = get_logger("hr_agents.jobs")
 
 _stop = threading.Event()
 _thread: threading.Thread | None = None
+
+# A job "running" longer than this was cut off: the instance slept, restarted or crashed
+# mid-run. A Copilot turn has a hard 4-minute limit; screening a large batch can take long.
+ABANDONED_AFTER = {("copilot", "turn"): timedelta(minutes=10), ("copilot", "approve"): timedelta(minutes=10)}
+ABANDONED_DEFAULT = timedelta(minutes=60)
+RECOVER_EVERY_SECONDS = 300
 
 
 def enqueue(db: Session, user: User, agent_name: str, action: str, params: dict) -> AgentJob:
@@ -117,6 +124,31 @@ def _turn_failed(job: AgentJob, error: str) -> None:
         db.commit()
 
 
+def recover_abandoned() -> int:
+    """Fail jobs left "running" by a worker that died, so nobody waits for them forever.
+
+    Runs when the worker starts and every few minutes after. A Copilot turn also gets its
+    "Copilot stopped" reply, so the chat stops polling. Returns how many jobs it recovered.
+    """
+    now = utcnow()
+    with SessionLocal() as db:
+        running = list(db.scalars(select(AgentJob).where(AgentJob.status == "running")))
+        stale = [j for j in running if j.started_at is None
+                 or now - j.started_at > ABANDONED_AFTER.get((j.agent, j.action), ABANDONED_DEFAULT)]
+        recovered = 0
+        for job in stale:
+            # Only fail it if it is still running (another worker may have just finished it).
+            claimed = db.execute(update(AgentJob).where(AgentJob.id == job.id, AgentJob.status == "running")
+                                 .values(status="error", finished_at=now,
+                                         error="Interrupted: the server stopped while this job was running"))
+            db.commit()
+            if claimed.rowcount == 1:
+                recovered += 1
+                _turn_failed(job, "the server restarted while I was working on this")
+                log.warning("job.abandoned", extra={"job_id": job.id, "agent": job.agent})
+        return recovered
+
+
 def run_job(job_id: int) -> None:
     with SessionLocal() as db:
         job = db.get(AgentJob, job_id)
@@ -165,8 +197,12 @@ def run_once() -> bool:
 
 
 def _loop() -> None:
+    last_recovery = time.monotonic()
     while not _stop.is_set():
         try:
+            if time.monotonic() - last_recovery > RECOVER_EVERY_SECONDS:
+                recover_abandoned()
+                last_recovery = time.monotonic()
             if not run_once():
                 _stop.wait(settings.worker_poll_seconds)
         except Exception:
@@ -179,6 +215,12 @@ def start_worker() -> None:
     if _thread and _thread.is_alive():
         return
     _stop.clear()
+    try:
+        recovered = recover_abandoned()      # jobs a previous process left half-done
+        if recovered:
+            log.info("job.recovered_on_start", extra={"count": recovered})
+    except Exception:
+        log.exception("job.recovery_failed")
     _thread = threading.Thread(target=_loop, name="agent-worker", daemon=True)
     _thread.start()
     log.info("job.worker_started")
