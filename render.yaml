@@ -1,11 +1,5 @@
 # Render Blueprint: New > Blueprint in the Render dashboard, pick this repo.
 # Secret values (sync: false) are asked for once, when you create the Blueprint.
-databases:
-  - name: hiring-desk-db
-    plan: free
-    databaseName: hiring_desk
-    user: hiring_desk
-
 services:
   - type: web
     name: hiring-desk
@@ -23,12 +17,11 @@ services:
         value: Hiring Desk
       - key: LOG_JSON
         value: "true"
-      # Postgres survives deploys; SQLite inside the container did not. Alembic upgrades
-      # an existing database in place on startup, so schema changes never wipe data.
+      # Managed Postgres (Supabase) supplied in the Render dashboard. Render's free
+      # database expired after 30 days and crashed three deploys; the blueprint must not
+      # create one. sync: false means a Blueprint sync never overwrites the live URL.
       - key: DATABASE_URL
-        fromDatabase:
-          name: hiring-desk-db
-          property: connectionString
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: ADMIN_EMAIL
