@@ -23,6 +23,10 @@
     "sha256": "8b54d6ccf51c9bea938884a4201c991bc7a1c34df702a4e82b1e51e125bd413c",
     "version": 1
   },
+  "resume_extraction.system": {
+    "sha256": "fa175931e7c34f1a3c3b6d03e5eb4c579ea0aa888baebe8b39679702f2d83ee2",
+    "version": 1
+  },
   "scheduling.system": {
     "sha256": "83eb3b49d4360182d0362815ef2593328b57a297941e31f34806ec6e688aaeee",
     "version": 1

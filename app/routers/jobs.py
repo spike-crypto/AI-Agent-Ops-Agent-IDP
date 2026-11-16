@@ -5,8 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user, require_hr
+from app.llm import get_llm_optional
 from app.models import CANDIDATE_STATUSES, JOB_STATUSES, Candidate, Interview, Job, User
-from app.resume_parsing import extract_text, find_email, fingerprint, guess_name
+from app.resume_parsing import find_email, fingerprint, guess_name
+from app.resume_processor import ResumeProcessingService
 
 router = APIRouter(tags=["jobs & candidates"])
 
@@ -49,7 +51,10 @@ def job_out(j: Job) -> dict:
 
 def candidate_out(c: Candidate, full: bool = True) -> dict:
     data = {"id": c.id, "job_id": c.job_id, "name": c.name, "email": c.email,
-            "resume_text": c.resume_text, "status": c.status, "source": c.source}
+            "resume_text": c.resume_text, "status": c.status, "source": c.source,
+            "extraction_method": getattr(c, "extraction_method", "standard") or "standard",
+            "extraction_status": getattr(c, "extraction_status", "completed") or "completed",
+            "extracted_data": getattr(c, "extracted_data", None) or {}}
     if full:  # HR only: interviewers don't see agent scores, so they judge independently
         data.update(score=c.score, screening=c.screening, feedback_summary=c.feedback_summary)
     return data
@@ -130,6 +135,7 @@ async def upload_resumes(job_id: int, files: list[UploadFile], db: Session = Dep
     existing = list(db.scalars(select(Candidate).where(Candidate.job_id == job_id)))
     seen_emails = {c.email.lower() for c in existing if c.email}
     seen_texts = {fingerprint(c.resume_text) for c in existing}
+    service = ResumeProcessingService(db)
     for f in files:
         name = f.filename or "resume"
         if not name.lower().endswith((".txt", ".pdf", ".md")):
@@ -140,14 +146,15 @@ async def upload_resumes(job_id: int, files: list[UploadFile], db: Session = Dep
             skipped.append({"file": name, "reason": "file larger than 2 MB"})
             continue
         try:
-            text = extract_text(name, data)
+            extracted = service.process(name, data, llm=get_llm_optional())
+            text = extracted.raw_text
         except Exception as exc:
             skipped.append({"file": name, "reason": f"could not read file: {exc}"})
             continue
         if not text:
             skipped.append({"file": name, "reason": "no text found (scanned PDF?)"})
             continue
-        email = find_email(text)
+        email = extracted.email or find_email(text)
         fp = fingerprint(text)
         if fp in seen_texts or (email and email in seen_emails):
             skipped.append({"file": name, "reason": "already added to this job"})
@@ -155,8 +162,16 @@ async def upload_resumes(job_id: int, files: list[UploadFile], db: Session = Dep
         seen_texts.add(fp)
         if email:
             seen_emails.add(email)
-        cand = Candidate(job_id=job_id, name=guess_name(name, text), email=email,
-                         resume_text=text, source="upload")
+        cand = Candidate(
+            job_id=job_id,
+            name=extracted.name or guess_name(name, text),
+            email=email,
+            resume_text=text,
+            source="upload",
+            extraction_method=extracted.method_used,
+            extraction_status=extracted.status,
+            extracted_data=extracted.to_dict(),
+        )
         db.add(cand)
         created.append(cand)
     db.commit()

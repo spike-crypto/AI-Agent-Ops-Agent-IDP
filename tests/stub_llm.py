@@ -26,6 +26,19 @@ class StubLLM:
         self.calls.append((system, prompt, json_mode))
         if self.fail:
             raise LLMError("stub model failure")
+        if json_mode and ("RESUME CONTENT:" in prompt or "extract structured candidate" in str(system).lower() or getattr(system, "name", "") == "resume_extraction.system"):
+            email = "stub.candidate@example.com"
+            if "@" in prompt:
+                m = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", prompt)
+                if m:
+                    email = m.group(0).lower()
+            return json.dumps({
+                "name": "Jane Doe",
+                "email": email,
+                "skills": ["Python", "FastAPI", "Docker", "SQLAlchemy"],
+                "education": [{"institution": "MIT", "degree": "B.S. in Computer Science", "year": "2020"}],
+                "experience": [{"title": "Software Engineer", "company": "Acme Inc", "duration": "2020-2024", "description": "Developed backend APIs"}]
+            })
         if json_mode and "CANDIDATES:" in prompt:
             return self._compare(prompt)
         if json_mode and "REQUIREMENTS:" in prompt and "RESUME:" in prompt:
