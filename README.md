@@ -189,8 +189,9 @@ Branch → Pull request → CI (test) + 1 approval → Merge to main → Deploy 
 
 1. Render dashboard → **New → Blueprint** → pick this repo. `render.yaml` creates the
    `hiring-desk` web service (Docker, free plan, health check `/health`,
-   **auto-deploy off**) and a free Postgres database, wiring `DATABASE_URL` into the
-   service. It asks for the secret values once.
+   **auto-deploy off**) and asks for the secret values once, including `DATABASE_URL`.
+   Use a managed Postgres URL (Supabase's connection-pooler URL works); the blueprint does
+   not create a Render database, because the free one expires after 30 days.
 2. Service → **Settings → Deploy Hook**: copy it into `.env` as `RENDER_DEPLOY_HOOK_URL`.
    Copy the service URL into `.env` as `APP_URL` (with `https://`, no trailing slash).
 3. `bash scripts/push-github-settings.sh spike-crypto/AI-Agent-Ops-Agent-IDP`
@@ -199,9 +200,10 @@ Branch → Pull request → CI (test) + 1 approval → Merge to main → Deploy 
 Keep auto-deploy **off**: if Render also deploys on push, every merge deploys twice.
 
 > **Prototype limits:** the free instance sleeps after ~15 idle minutes (the first request
-> takes about a minute), free Postgres expires after 30 days, and the in-process worker means
-> one worker process; run more only after replacing the job queue's poller with a shared
-> queue. Use fake resumes only: free OpenRouter models may log prompts.
+> takes about a minute), Render's free Postgres expires after 30 days (production uses
+> Supabase), and the in-process worker means one worker process; run more only after
+> replacing the job queue's poller with a shared queue. Use fake resumes only: free
+> OpenRouter models may log prompts.
 
 Schema changes are applied by Alembic at startup (`run_migrations()`), so an existing
 database is upgraded in place instead of being reset. New columns need a migration in

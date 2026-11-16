@@ -25,7 +25,7 @@
 | Repo (public) | https://github.com/spike-crypto/AI-Agent-Ops-Agent-IDP |
 | Live app | https://hiring-desk-30s9.onrender.com (`/health`, `/docs`) |
 | Render service | `srv-dbq6ogd6e07s73bd20q0`, created by Abinesh's Render account from `render.yaml` |
-| Production database | Supabase Postgres (`aws-0-ap-southeast-2.pooler.supabase.com`), set as Render `DATABASE_URL` on 2026-11-13. The earlier Render Postgres (`dpg-dbqoa0tbedkc73e8oaf0-a`) expired and made three deploys crash at startup. Local `.env` deliberately stays on SQLite |
+| Production database | Supabase Postgres (`aws-0-ap-southeast-2.pooler.supabase.com`), set as Render `DATABASE_URL` on 2026-11-13. The earlier Render Postgres (`dpg-dbqoa0tbedkc73e8oaf0-a`) expired and made three deploys crash at startup. `render.yaml` now takes the URL as a `sync: false` secret instead of creating a database. Local `.env` deliberately stays on SQLite |
 | Render API | `RENDER_API_KEY` in local `.env` (git-ignored): deploy status and logs via `api.render.com/v1/services/<id>/deploys` and `/v1/logs` |
 | Production test users | 1 HR admin + 2 interviewers (made-up), logins in git-ignored `.env.prod-test-users` |
 | Local project | `D:\Projects\Agent IDP` (Windows 11, PowerShell + Git Bash) |
@@ -147,9 +147,10 @@
 - GitHub settings: secret `RENDER_DEPLOY_HOOK_URL` (set by Abinesh), variable `APP_URL`
   (`https://hiring-desk-30s9.onrender.com`). Abinesh also added an unused secret `APP_URL`; harmless.
 - `render.yaml`: Docker web service `hiring-desk` (free plan, `healthCheckPath: /health`,
-  `autoDeployTrigger: off`) plus a free Postgres database wired in as `DATABASE_URL`, with
-  `APP_ENV=production` and `LOG_JSON=true`. Render must not deploy on its own, or every merge
-  deploys twice; confirm in the dashboard.
+  `autoDeployTrigger: off`) with `APP_ENV=production` and `LOG_JSON=true`. `DATABASE_URL` is a
+  `sync: false` secret (the Supabase URL), so a Blueprint sync neither creates an expiring
+  Render database nor overwrites the live URL. Render must not deploy on its own, or every
+  merge deploys twice; confirm in the dashboard.
 - **Branch protection on main:** PR required, 1 approval, `test` check, `enforce_admins` on.
   Nobody approves their own PR.
 - **Branch housekeeping:** merging a PR deletes its head branch automatically
