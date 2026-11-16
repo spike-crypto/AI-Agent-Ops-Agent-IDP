@@ -3,6 +3,7 @@
 from app.agents.comparison import ComparisonAgent
 from app.agents.copilot import CopilotAgent
 from app.agents.feedback import FeedbackAgent
+from app.agents.integration import IntegrationAgent
 from app.agents.interview_kit import InterviewKitAgent
 from app.agents.scheduling import SchedulingAgent
 from app.agents.recruiter import RecruiterAgent
@@ -20,5 +21,6 @@ AGENTS = {
         InterviewKitAgent(),
         RecruiterAgent(),
         CopilotAgent(),
+        IntegrationAgent(),
     )
 }
