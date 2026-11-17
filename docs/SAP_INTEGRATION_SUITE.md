@@ -126,6 +126,47 @@ npx @modelcontextprotocol/inspector
 | `429` | More than 120 calls a minute on one key. |
 | Tools missing in the Inspector | Operations not selected in step 4, or the MCP server not redeployed after a spec change. |
 
+## 7. Connect Claude Code (a real AI agent)
+
+The subscription uses client credentials, and the token lasts an hour, so Claude Code gets
+its header from a helper instead of a pasted token.
+
+1. Save the subscription's credentials in `.env.sap-oauth` at the repo root (git-ignored):
+
+   ```
+   SAP_TOKEN_URL=https://<subaccount>.authentication.<region>.hana.ondemand.com/oauth/token
+   SAP_CLIENT_ID=<key>
+   SAP_CLIENT_SECRET=<secret>
+   ```
+
+2. Check the helper prints a header: `python scripts/sap_mcp_headers.py`. It caches the token
+   in `.sap-token-cache.json` (git-ignored) until a minute before it expires.
+3. Register the server for yourself only (`--scope local` keeps it out of the repo). The
+   helper paths must be absolute:
+
+   ```bash
+   claude mcp add-json --scope local hiring-desk-sap '{"type":"http",
+     "url":"https://<your-integration-cell-host>/hiringDeskMCP",
+     "headersHelper":"\"<abs path>/python\" \"<abs path>/scripts/sap_mcp_headers.py\""}'
+   claude mcp get hiring-desk-sap        # Status: Connected
+   ```
+
+4. Start a new Claude Code session (servers load at start), run `/mcp`, and ask for jobs or
+   candidates "using hiring-desk-sap". Calls show in SAP Monitor and under **AI activity**.
+
+Give each person or agent **its own Developer Hub subscription**, so one can be revoked without
+touching the others.
+
+## Gotchas we hit (2026-11-16)
+
+| Symptom | Fix |
+|---|---|
+| `PKIX path building failed ... unable to find valid certification path` in Monitor | The Integration Cell does not trust Render's certificate chain (Google Trust Services). Monitor → Manage Security → **Keystore** → Add → Certificate: add **GTS Root R4** and **WE1** (`openssl s_client -connect <host>:443 -showcerts` prints them). The Cockpit's Check Connection passes anyway, because it uses a different trust store. |
+| `Unsupported protocol version (supported versions: 2026-07-28,2025-11-25)` | The gateway speaks newer MCP versions only; set the client's protocol version to `2025-11-25`. |
+| Subscription fails: "developer is not registered in the Developer Hub" | Click **Register**, then approve your own request in **Admin Center**. No email arrives on a trial. |
+| `get_jobs` says "internal server error" with an MPL ID | Look the ID up in Monitor → Message Processing (runtime **Integration Cell**, type **All**). **Error Details** has the real cause. |
+| Tools are named `get_jobs_job_id_candidates` | SAP names tools after the URL path, not the `operationId`. Rename them in the MCP server's **MCP Configuration → Tools** if you want shorter names. |
+
 ## Going further
 
 - **Trial vs production:** the tutorial notes that productive use needs the Premium or Enhanced

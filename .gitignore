@@ -7,3 +7,6 @@ app/version.txt
 .superpowers/
 .env.*
 !.env.example
+
+# SAP MCP Gateway OAuth token cache (scripts/sap_mcp_headers.py)
+.sap-token-cache.json
